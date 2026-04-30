@@ -294,34 +294,44 @@ function parseDetailResponse(html, fallbackUrl) {
 
         // Inject into WebView to block VAST ad requests and strip jwplayer advertising config
         var customJs = "(function(){" +
-            "var xo=XMLHttpRequest.prototype.open;" +
+            "var _jw=null;" +
+            "try{Object.defineProperty(window,'jwplayer',{" +
+            "configurable:true,enumerable:true," +
+            "get:function(){return _jw;}," +
+            "set:function(val){" +
+            "_jw=function(){" +
+            "var p=val.apply(this,arguments);" +
+            "if(p&&p.setup){" +
+            "var os=p.setup.bind(p);" +
+            "p.setup=function(c){" +
+            "if(c){delete c.advertising;delete c.vast;delete c.schedule;delete c.plugins;" +
+            "if(c.playlist&&Array.isArray(c.playlist)){" +
+            "c.playlist.forEach(function(item){delete item.adschedule;delete item.advertising;});}" +
+            "}return os(c);};" +
+            "}return p;};" +
+            "Object.keys(val).forEach(function(k){try{_jw[k]=val[k];}catch(e){}});" +
+            "}}});}catch(e){}" +
+            "var _t=setInterval(function(){" +
+            "if(window.jwplayer&&!window.jwplayer._patched){clearInterval(_t);" +
+            "var orig=window.jwplayer;" +
+            "var w=function(){var p=orig.apply(this,arguments);" +
+            "if(p&&p.setup){var os=p.setup.bind(p);" +
+            "p.setup=function(c){if(c){delete c.advertising;delete c.vast;delete c.schedule;}return os(c);};" +
+            "}return p;};w._patched=true;" +
+            "Object.keys(orig).forEach(function(k){try{w[k]=orig[k];}catch(e){}});" +
+            "window.jwplayer=w;}},5);" +
+            "var AD=['githubusercontent.com/hiller','6789x.site','streamc.xyz/1.mp4','vsbet','colatv','doubleclick','googlesyndication'];" +
+            "var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;" +
             "XMLHttpRequest.prototype.open=function(m,u){" +
-            "if(u&&(u.indexOf('githubusercontent.com/hiller')>-1||u.indexOf('6789x.site')>-1||u.indexOf('streamc.xyz/1.mp4')>-1)){this._b=1;return;}" +
-            "return xo.apply(this,arguments);};" +
-            "var xs=XMLHttpRequest.prototype.send;" +
+            "this._b=u&&AD.some(function(d){return u.indexOf(d)>-1;});" +
+            "if(!this._b)return xo.apply(this,arguments);};" +
             "XMLHttpRequest.prototype.send=function(d){if(this._b)return;return xs.apply(this,arguments);};" +
             "var of=window.fetch;" +
-            "if(of)window.fetch=function(u,o){var s=typeof u==='string'?u:'';" +
-            "if(s.indexOf('githubusercontent.com/hiller')>-1||s.indexOf('6789x.site')>-1||s.indexOf('streamc.xyz/1.mp4')>-1)" +
+            "if(of)window.fetch=function(u,o){var s=typeof u==='string'?u:(u&&u.url)||'';" +
+            "if(AD.some(function(d){return s.indexOf(d)>-1;}))" +
             "return Promise.resolve(new Response('',{status:200}));" +
             "return of.apply(this,arguments);};" +
-            "var t=setInterval(function(){" +
-            "if(window.jwplayer){clearInterval(t);" +
-            "var orig=window.jwplayer;" +
-            "window.jwplayer=function(){var p=orig.apply(this,arguments);" +
-            "if(p&&p.setup){var s=p.setup;" +
-            "p.setup=function(c){if(c){delete c.advertising;delete c.vast;}return s.call(p,c);};}return p;};" +
-            "Object.keys(orig).forEach(function(k){window.jwplayer[k]=orig[k];});}},20);" +
             "})();";
-
-        return JSON.stringify({
-            url: streamUrl,
-            headers: {
-                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                "Referer": "https://embed.streamc.xyz/",
-                "Custom-Js": customJs
-            }
-        });
     } catch (error) { return "{}"; }
 }
 
