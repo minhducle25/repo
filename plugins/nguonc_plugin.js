@@ -6,12 +6,12 @@ function getManifest() {
     return JSON.stringify({
         "id": "nguonc",
         "name": "Phim NguonC",
-        "version": "1.0.8",
+        "version": "1.0.9",
         "baseUrl": "https://phim.nguonc.com",
         "iconUrl": "https://raw.githubusercontent.com/youngbi/repo/main/plugins/nguonC.png",
         "isEnabled": true,
         "type": "MOVIE",
-        "playerType": "embed"
+        "playerType": "auto"
     });
 }
 
@@ -217,9 +217,8 @@ function parseMovieDetail(apiResponseJson) {
                         var embed = ep.embed || ep.link_embed || "";
                         var m3u8 = ep.m3u8 || ep.link_m3u8 || "";
 
-                        // Use Embed URL as ID to allow scraping Referer/M3u8 details
-                        // If no embed, use m3u8 directly.
-                        var link = embed || m3u8;
+                        // Prefer direct m3u8 stream over embed to avoid ad-injected WebView
+                        var link = m3u8 || embed;
 
                         if (link) {
                             episodes.push({
@@ -285,7 +284,6 @@ function parseMovieDetail(apiResponseJson) {
 function parseDetailResponse(html) {
     try {
         // Find m3u8 link in the Embed HTML (JWPlayer/Source)
-        // Regex for file: "..." or source: "..." containing .m3u8
         var m3u8Regex = /file:\s*["']([^"']+\.m3u8[^"']*)["']|source:\s*["']([^"']+\.m3u8[^"']*)["']|src:\s*["']([^"']+\.m3u8[^"']*)["']|["']([^"']+\.m3u8[^"']*)["']/;
         var match = html.match(m3u8Regex);
 
@@ -299,14 +297,13 @@ function parseDetailResponse(html) {
                 url: m3u8,
                 headers: {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-                    "Referer": "https://embed.streamc.xyz/"
+                    "Referer": "https://embed.streamc.xyz/",
+                    // Block ad domains: VAST config host, ad click-out, and ad video file
+                    "Allowed-Domains": "embed.streamc.xyz,streamc.xyz,cdn.jwplayer.com,jwpltx.com,entitlements.jwplayer.com"
                 }
             });
         }
 
-        // Fallback: Return empty (or original URL will be used by app if this returns empty/invalid?)
-        // If we return {}, the App might crash or handle it.
-        // Better to return the input URL if we can't find m3u8, but we don't have input URL here easily unless we parse it from html? No.
         return "{}";
     } catch (error) { return "{}"; }
 }
