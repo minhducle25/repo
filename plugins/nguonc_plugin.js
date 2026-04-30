@@ -6,12 +6,12 @@ function getManifest() {
     return JSON.stringify({
         "id": "nguonc",
         "name": "Phim NguonC",
-        "version": "1.0.9",
+        "version": "1.2.0",
         "baseUrl": "https://phim.nguonc.com",
         "iconUrl": "https://raw.githubusercontent.com/youngbi/repo/main/plugins/nguonC.png",
         "isEnabled": true,
         "type": "MOVIE",
-        "playerType": "auto"
+        "playerType": "embed"
     });
 }
 
@@ -217,7 +217,8 @@ function parseMovieDetail(apiResponseJson) {
                         var embed = ep.embed || ep.link_embed || "";
                         var m3u8 = ep.m3u8 || ep.link_m3u8 || "";
 
-                        // Prefer direct m3u8 stream over embed to avoid ad-injected WebView
+                        // Use Embed URL as ID to allow scraping Referer/M3u8 details
+                        // If no embed, use m3u8 directly.
                         var link = m3u8 || embed;
 
                         if (link) {
@@ -292,14 +293,61 @@ function parseDetailResponse(html) {
             m3u8 = match[1] || match[2] || match[3] || match[4];
         }
 
+        // JS injected into WebView to disable JWPlayer advertising before it initializes
+        var adBlockJs = [
+            // 1. Block VAST/ad XHR requests (githubusercontent = VAST config, 6789x = ad click-out)
+            "(function(){",
+            "var _xhrOpen = XMLHttpRequest.prototype.open;",
+            "XMLHttpRequest.prototype.open = function(m,u){",
+            "  if(u && (u.indexOf('githubusercontent.com/hiller')!==-1 || u.indexOf('6789x.site')!==-1 || u.indexOf('streamc.xyz/1.mp4')!==-1)){",
+            "    this._blocked=true; return;",
+            "  }",
+            "  return _xhrOpen.apply(this,arguments);",
+            "};",
+            "var _xhrSend = XMLHttpRequest.prototype.send;",
+            "XMLHttpRequest.prototype.send = function(d){",
+            "  if(this._blocked) return;",
+            "  return _xhrSend.apply(this,arguments);",
+            "};",
+            // 2. Block via fetch API as well
+            "var _fetch = window.fetch;",
+            "window.fetch = function(u,o){",
+            "  var url = (typeof u==='string')?u:(u&&u.url)||'';",
+            "  if(url.indexOf('githubusercontent.com/hiller')!==-1 || url.indexOf('6789x.site')!==-1 || url.indexOf('streamc.xyz/1.mp4')!==-1){",
+            "    return Promise.resolve(new Response('',{status:200}));",
+            "  }",
+            "  return _fetch.apply(this,arguments);",
+            "};",
+            // 3. Override jwplayer setup to strip advertising config
+            "var _t=setInterval(function(){",
+            "  if(window.jwplayer){",
+            "    clearInterval(_t);",
+            "    var _orig=window.jwplayer;",
+            "    var _wrap=function(){",
+            "      var p=_orig.apply(this,arguments);",
+            "      if(p&&p.setup){",
+            "        var _os=p.setup.bind(p);",
+            "        p.setup=function(c){",
+            "          if(c){delete c.advertising; delete c.vast;}",
+            "          return _os(c);",
+            "        };",
+            "      }",
+            "      return p;",
+            "    };",
+            "    Object.keys(_orig).forEach(function(k){_wrap[k]=_orig[k];});",
+            "    window.jwplayer=_wrap;",
+            "  }",
+            "},30);",
+            "})();"
+        ].join("");
+
         if (m3u8) {
             return JSON.stringify({
                 url: m3u8,
                 headers: {
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
                     "Referer": "https://embed.streamc.xyz/",
-                    // Block ad domains: VAST config host, ad click-out, and ad video file
-                    "Allowed-Domains": "embed.streamc.xyz,streamc.xyz,cdn.jwplayer.com,jwpltx.com,entitlements.jwplayer.com"
+                    "Custom-Js": adBlockJs
                 }
             });
         }
