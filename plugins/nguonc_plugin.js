@@ -175,7 +175,7 @@ function parseMovieDetail(apiResponseJson) {
                     serverItems.forEach(function (ep) {
                         var embed = ep.embed || ep.link_embed || "";
                         var m3u8 = ep.m3u8 || ep.link_m3u8 || "";
-                        var link = embed || m3u8;
+                        var link = m3u8 || embed;
                         if (link) {
                             episodes.push({
                                 id: link,
