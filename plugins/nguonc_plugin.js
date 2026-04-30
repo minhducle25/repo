@@ -294,44 +294,85 @@ function parseDetailResponse(html, fallbackUrl) {
 
         // Inject into WebView to block VAST ad requests and strip jwplayer advertising config
         var customJs = "(function(){" +
-            "var _jw=null;" +
-            "try{Object.defineProperty(window,'jwplayer',{" +
-            "configurable:true,enumerable:true," +
-            "get:function(){return _jw;}," +
-            "set:function(val){" +
-            "_jw=function(){" +
-            "var p=val.apply(this,arguments);" +
-            "if(p&&p.setup){" +
-            "var os=p.setup.bind(p);" +
-            "p.setup=function(c){" +
-            "if(c){delete c.advertising;delete c.vast;delete c.schedule;delete c.plugins;" +
-            "if(c.playlist&&Array.isArray(c.playlist)){" +
-            "c.playlist.forEach(function(item){delete item.adschedule;delete item.advertising;});}" +
-            "}return os(c);};" +
-            "}return p;};" +
-            "Object.keys(val).forEach(function(k){try{_jw[k]=val[k];}catch(e){}});" +
-            "}}});}catch(e){}" +
-            "var _t=setInterval(function(){" +
-            "if(window.jwplayer&&!window.jwplayer._patched){clearInterval(_t);" +
-            "var orig=window.jwplayer;" +
-            "var w=function(){var p=orig.apply(this,arguments);" +
-            "if(p&&p.setup){var os=p.setup.bind(p);" +
-            "p.setup=function(c){if(c){delete c.advertising;delete c.vast;delete c.schedule;}return os(c);};" +
-            "}return p;};w._patched=true;" +
-            "Object.keys(orig).forEach(function(k){try{w[k]=orig[k];}catch(e){}});" +
-            "window.jwplayer=w;}},5);" +
-            "var AD=['githubusercontent.com/hiller','6789x.site','streamc.xyz/1.mp4','vsbet','colatv','doubleclick','googlesyndication'];" +
+            // ── Block VAST/Ad requests tại network level ──
+            "var AD=['vast','googlesyndication','doubleclick','adserver','vsbet','colatv','6789x','hiller','streamc.xyz/1.mp4','adsystem','adnxs','ima3'];" +
             "var xo=XMLHttpRequest.prototype.open,xs=XMLHttpRequest.prototype.send;" +
             "XMLHttpRequest.prototype.open=function(m,u){" +
-            "this._b=u&&AD.some(function(d){return u.indexOf(d)>-1;});" +
-            "if(!this._b)return xo.apply(this,arguments);};" +
-            "XMLHttpRequest.prototype.send=function(d){if(this._b)return;return xs.apply(this,arguments);};" +
+            "  this._u=u||'';this._b=AD.some(function(d){return this._u.toLowerCase().indexOf(d)>-1;},this);" +
+            "  if(!this._b)return xo.apply(this,arguments);" +
+            "};" +
+            "XMLHttpRequest.prototype.send=function(d){" +
+            "  if(this._b){" +
+            // Trả về empty VAST XML để player không bị lỗi, chỉ skip ad
+            "    Object.defineProperty(this,'status',{get:function(){return 200;}});" +
+            "    Object.defineProperty(this,'responseText',{get:function(){return '<VAST version=\"3.0\"/>';}});" +
+            "    Object.defineProperty(this,'response',{get:function(){return '<VAST version=\"3.0\"/>';}});" +
+            "    setTimeout(function(){" +
+            "      var e=new Event('load');this.dispatchEvent&&this.dispatchEvent(e);" +
+            "    }.bind(this),10);" +
+            "    return;" +
+            "  }" +
+            "  return xs.apply(this,arguments);" +
+            "};" +
             "var of=window.fetch;" +
-            "if(of)window.fetch=function(u,o){var s=typeof u==='string'?u:(u&&u.url)||'';" +
-            "if(AD.some(function(d){return s.indexOf(d)>-1;}))" +
-            "return Promise.resolve(new Response('',{status:200}));" +
-            "return of.apply(this,arguments);};" +
-            "})();";
+            "if(of)window.fetch=function(u,o){" +
+            "  var s=(typeof u==='string'?u:(u&&u.url)||'').toLowerCase();" +
+            "  if(AD.some(function(d){return s.indexOf(d)>-1;}))" +
+            "    return Promise.resolve(new Response('<VAST version=\"3.0\"/>',{status:200,headers:{'Content-Type':'text/xml'}}));" +
+            "  return of.apply(this,arguments);" +
+            "};" +
+        
+            // ── Intercept jwplayer TRƯỚC khi load (defineProperty) ──
+            "var _jw=null;" +
+            "try{Object.defineProperty(window,'jwplayer',{configurable:true,enumerable:true," +
+            "  get:function(){return _jw;}," +
+            "  set:function(val){" +
+            "    _jw=function(){var p=val.apply(this,arguments);" +
+            "      if(p&&p.setup){var os=p.setup.bind(p);" +
+            "        p.setup=function(c){" +
+            "          if(c){" +
+            "            delete c.advertising;delete c.vast;delete c.schedule;delete c.plugins;" +
+            "            if(c.playlist&&Array.isArray(c.playlist))" +
+            "              c.playlist.forEach(function(i){delete i.adschedule;delete i.advertising;});" +
+            "          }return os(c);" +
+            "        };" +
+            "      }return p;" +
+            "    };" +
+            "    Object.keys(val).forEach(function(k){try{_jw[k]=val[k];}catch(e){}});" +
+            "  }" +
+            "});}catch(e){}" +
+        
+            // ── Fallback setInterval (iOS) ──
+            "var _t=setInterval(function(){" +
+            "  if(window.jwplayer&&!window.jwplayer._p){clearInterval(_t);" +
+            "    var orig=window.jwplayer;" +
+            "    var w=function(){var p=orig.apply(this,arguments);" +
+            "      if(p&&p.setup){var os=p.setup.bind(p);" +
+            "        p.setup=function(c){" +
+            "          if(c){delete c.advertising;delete c.vast;delete c.schedule;}" +
+            "          return os(c);" +
+            "        };" +
+            "      }return p;" +
+            "    };w._p=true;" +
+            "    Object.keys(orig).forEach(function(k){try{w[k]=orig[k];}catch(e){}});" +
+            "    window.jwplayer=w;" +
+            "  }" +
+            "},5);" +
+        
+            // ── Fallback cuối: Auto-click nút skip nếu ad vẫn xuất hiện ──
+            "function trySkip(){" +
+            "  var sels=['.jw-skip','.jw-skipButton','[class*=\"skip\"]','[id*=\"skip\"]','button[class*=\"skip\"]'];" +
+            "  for(var i=0;i<sels.length;i++){" +
+            "    var btn=document.querySelector(sels[i]);" +
+            "    if(btn){btn.click();return true;}" +
+            "  }return false;" +
+            "}" +
+            // Dùng MutationObserver để bắt nút skip ngay khi DOM thêm vào
+            "var obs=new MutationObserver(function(){trySkip();});" +
+            "obs.observe(document.documentElement,{childList:true,subtree:true});" +
+            // Cũng poll mỗi 300ms trong 30s đầu làm safety net
+            "var _s=0,_si=setInterval(function(){if(trySkip()||_s++>100)clearInterval(_si);},300);" +
+        "})();";
     } catch (error) { return "{}"; }
 }
 
