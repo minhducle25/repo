@@ -527,8 +527,17 @@ function parseDetailResponse(html) {
         }
 
         if (streamUrl && streamUrl.indexOf("blob:") === -1) {
+            // Determine if this is an embed page (needs WebView) vs a direct stream URL
+            var isDirectStream = /\.(m3u8|mp4|mkv)(\?|#|$)/i.test(streamUrl);
+            
+            // For embed URLs, add allowed domains so WebView doesn't block required resources
+            if (!isDirectStream) {
+                headers["Allowed-Domains"] = "streamfree.vip,ibyteimg.com,p16-ad-sg.ibyteimg.com,ibytedtos.com";
+            }
+            
             return JSON.stringify({
                 url: streamUrl,
+                isEmbed: !isDirectStream,
                 headers: headers,
                 subtitles: []
             });
