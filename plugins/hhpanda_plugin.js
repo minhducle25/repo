@@ -315,14 +315,20 @@ function parseMovieDetail(html) {
         }
 
         // 2. Find all episode lists (ul#listsv-X)
-        var listRegex = /<ul[^>]*id="listsv-(\d+)"[^>]*class="[^"]*halim-list-eps[^"]*"[^>]*>([\s\S]*?)<\/ul>/gi;
+        var openingRegex = /<ul[^>]*id="listsv-(\d+)"[^>]*class="[^"]*halim-list-eps[^"]*"[^>]*>/gi;
+        var openingMatch;
         var serverIndex = 1;
         var foundSvIds = {};
 
-        while ((listMatch = listRegex.exec(html)) !== null) {
-            var svId = listMatch[1];
+        while ((openingMatch = openingRegex.exec(html)) !== null) {
+            var svId = openingMatch[1];
             foundSvIds[svId] = true;
-            var listHtml = listMatch[2];
+            
+            var startIndex = openingRegex.lastIndex;
+            var endIndex = html.indexOf("</ul>", startIndex);
+            if (endIndex === -1) endIndex = html.length;
+            
+            var listHtml = html.substring(startIndex, endIndex);
             var serverName = serverMap[svId] || "Server " + serverIndex;
 
             var episodes = [];
@@ -393,10 +399,14 @@ function parseMovieDetail(html) {
 
         // Fallback: If no servers parsed by IDs, look for halim-server name blocks
         if (servers.length === 0) {
-            var serverBlockRegex = /<div[^>]*class="[^"]*halim-server[^"]*"[^>]*>([\s\S]*?)<\/ul>/gi;
+            var serverBlockRegex = /<div[^>]*class="[^"]*halim-server[^"]*"[^>]*>/gi;
             var blockMatch;
             while ((blockMatch = serverBlockRegex.exec(html)) !== null) {
-                var blockHtml = blockMatch[1];
+                var sIdx = serverBlockRegex.lastIndex;
+                var eIdx = html.indexOf("</ul>", sIdx);
+                if (eIdx === -1) eIdx = html.length;
+                var blockHtml = html.substring(sIdx, eIdx);
+                
                 var svNameMatch = blockHtml.match(/<span[^>]*class="halim-server-name"[^>]*>([\s\S]*?)<\/span>/i);
                 var svName = svNameMatch ? PluginUtils.cleanText(svNameMatch[1]) : "Server " + serverIndex;
 
@@ -439,7 +449,7 @@ function parseMovieDetail(html) {
             duration: status
         });
     } catch (e) {
-        return "null";
+        return "ERROR: " + e.message;
     }
 }
 
