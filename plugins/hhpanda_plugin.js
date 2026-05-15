@@ -303,44 +303,22 @@ function parseMovieDetail(html) {
             || html.match(/class=["'][^"']*postid-(\d+)[^"']*["']/i);
         var postId = postIdMatch ? (postIdMatch[1] || postIdMatch[2]) : "";
 
-        // Parse servers and episodes
+        // Parse servers and episodes using halim-server blocks
+        // Each block has a halim-server-name span and an episode list (ul.halim-list-eps)
         var servers = [];
-
-        // 1. Map server IDs to names from halim-ajax-list-server (VIP 1, VIP 2, etc.)
-        var serverMap = {};
-        var serverLabelRegex = /<span[^>]*id="server-item-\d+"[^>]*data-subsv-id="(\d+)"[^>]*>([\s\S]*?)<\/span>/gi;
-        var labelMatch;
-        while ((labelMatch = serverLabelRegex.exec(html)) !== null) {
-            serverMap[labelMatch[1]] = PluginUtils.cleanText(labelMatch[2]);
-        }
-
-        // 2. Find all episode lists (ul#listsv-X)
-        var openingRegex = /<ul[^>]*id="listsv-(\d+)"[^>]*class="[^"]*halim-list-eps[^"]*"[^>]*>/gi;
-        var openingMatch;
         var serverIndex = 1;
-        var foundSvIds = {};
 
-        while ((openingMatch = openingRegex.exec(html)) !== null) {
-            var svId = openingMatch[1];
-            foundSvIds[svId] = true;
-            
-            var startIndex = openingRegex.lastIndex;
-            var endIndex = html.indexOf("</ul>", startIndex);
-            if (endIndex === -1) endIndex = html.length;
-            
-            var listHtml = html.substring(startIndex, endIndex);
-            var serverName = serverMap[svId] || "Server " + serverIndex;
-
+        // Helper: extract episodes from a block of HTML containing <li><a>...</a></li> items
+        var parseEpisodesFromBlock = function (blockHtml, svIdOverride) {
             var episodes = [];
             var epRegex = /<li[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/li>/gi;
             var epMatch;
 
-            while ((epMatch = epRegex.exec(listHtml)) !== null) {
+            while ((epMatch = epRegex.exec(blockHtml)) !== null) {
                 var epUrl = epMatch[1];
                 var epInner = epMatch[2];
                 var epDisplay = "";
 
-                // Try to get clean ep name from span if exists
                 var spanMatch = epInner.match(/<span[^>]*>([\s\S]*?)<\/span>/i);
                 if (spanMatch) {
                     epDisplay = PluginUtils.cleanText(spanMatch[1]);
@@ -348,87 +326,66 @@ function parseMovieDetail(html) {
                     epDisplay = PluginUtils.cleanText(epInner);
                 }
 
-                // Extract slug - this page URL might be something like hoathinh3d.la/xem-phim-abc/tap-1-sv1.html
+                // Extract slug for player.php API
                 var epSlugMatch = epUrl.match(/\/([^\/.]+)\.html/);
                 var epSlugRaw = epSlugMatch ? epSlugMatch[1] : epUrl.replace(/https?:\/\/[^\/]+\//, "").replace(/\/$/, "");
-
-                // Remove server suffix like -sv1, -sv2 from slug for player.php API
                 var epSlug = epSlugRaw.replace(/-sv\d+$/, "");
 
-                // Special ID for player API: slug|postId|svId
-                var specialId = epSlug + "|" + postId + "|" + svId;
+                // Detect server ID from URL pattern (e.g. tap-1-sv1.html → sv=1, tap-1-sv2.html → sv=2)
+                var urlSvMatch = epUrl.match(/-sv(\d+)\.html/i);
+                var epSvId = urlSvMatch ? urlSvMatch[1] : (svIdOverride || "1");
+
+                var specialId = epSlug + "|" + postId + "|" + epSvId;
 
                 episodes.push({
                     id: specialId,
-                    name: "Tập " + epDisplay,
+                    name: epDisplay.match(/^[Tt]ập\s/) ? epDisplay : "Tập " + epDisplay,
                     slug: epUrl.replace(/https?:\/\/[^\/]+\//, "").replace(/\/$/, "")
                 });
             }
+            return episodes;
+        };
+
+        // Primary approach: iterate halim-server div blocks
+        var serverBlockMarker = 'class="halim-server';
+        var searchPos = 0;
+        
+        while (true) {
+            var blockStart = html.indexOf(serverBlockMarker, searchPos);
+            if (blockStart === -1) break;
+
+            // Find the end of this server block (next halim-server or end of halim-list-eps section)
+            var nextBlockStart = html.indexOf(serverBlockMarker, blockStart + serverBlockMarker.length);
+            var blockEndUl = html.indexOf("</ul>", blockStart);
+            if (blockEndUl === -1) blockEndUl = html.length;
+            
+            // Block extends from blockStart to end of its </ul>
+            var blockEnd = blockEndUl + 5; // include </ul>
+            var blockHtml = html.substring(blockStart, blockEnd);
+
+            // Extract server name from halim-server-name span
+            var svNameMatch = blockHtml.match(/<span[^>]*class="[^"]*halim-server-name[^"]*"[^>]*>([\s\S]*?)<\/span>/i);
+            var svName = svNameMatch ? PluginUtils.cleanText(svNameMatch[1]) : "Server " + serverIndex;
+            // Clean up common prefixes like '#'
+            svName = svName.replace(/^#\s*/, "").replace(/:$/, "").trim();
+            if (!svName) svName = "Server " + serverIndex;
+
+            // Extract data-subsv-id if available
+            var subsvMatch = blockHtml.match(/data-subsv-id="(\d+)"/i);
+            var subsvId = subsvMatch ? subsvMatch[1] : String(serverIndex);
+
+            var episodes = parseEpisodesFromBlock(blockHtml, subsvId);
 
             if (episodes.length > 0) {
-                // Đảo ngược danh sách: từ tập cũ nhất (1) đến mới nhất
-                episodes.reverse();
-
+                episodes.reverse(); // oldest first
                 servers.push({
-                    name: serverName,
+                    name: svName,
                     episodes: episodes
                 });
                 serverIndex++;
             }
-        }
 
-        // 3. Multi-Server Support: Clone episodes for servers loaded via AJAX
-        for (var sId in serverMap) {
-            if (!foundSvIds[sId] && servers.length > 0) {
-                var sName = serverMap[sId];
-                // Clone from the first available server's episodes
-                var clonedEps = servers[0].episodes.map(function (ep) {
-                    var parts = ep.id.split("|");
-                    if (parts.length >= 3) {
-                        return {
-                            id: parts[0] + "|" + parts[1] + "|" + sId,
-                            name: ep.name,
-                            slug: ep.slug
-                        };
-                    }
-                    return ep;
-                });
-                servers.push({ name: sName, episodes: clonedEps });
-            }
-        }
-
-        // Fallback: If no servers parsed by IDs, look for halim-server name blocks
-        if (servers.length === 0) {
-            var serverBlockRegex = /<div[^>]*class="[^"]*halim-server[^"]*"[^>]*>/gi;
-            var blockMatch;
-            while ((blockMatch = serverBlockRegex.exec(html)) !== null) {
-                var sIdx = serverBlockRegex.lastIndex;
-                var eIdx = html.indexOf("</ul>", sIdx);
-                if (eIdx === -1) eIdx = html.length;
-                var blockHtml = html.substring(sIdx, eIdx);
-                
-                var svNameMatch = blockHtml.match(/<span[^>]*class="halim-server-name"[^>]*>([\s\S]*?)<\/span>/i);
-                var svName = svNameMatch ? PluginUtils.cleanText(svNameMatch[1]) : "Server " + serverIndex;
-
-                var eps = [];
-                var epMatchEx = /<li[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>\s*<\/li>/gi;
-                var epm;
-                while ((epm = epMatchEx.exec(blockHtml)) !== null) {
-                    var eUrl = epm[1];
-                    var eInner = epm[2];
-                    var eDisplay = "";
-                    var sMatch = eInner.match(/<span[^>]*>([\s\S]*?)<\/span>/i);
-                    eDisplay = sMatch ? PluginUtils.cleanText(sMatch[1]) : PluginUtils.cleanText(eInner);
-                    var eSlug = eUrl.replace(/https?:\/\/[^\/]+\//, "").replace(/\/$/, "");
-                    eps.push({ id: eSlug, name: "Tập " + eDisplay, slug: eSlug });
-                }
-                if (eps.length > 0) {
-                    // Đảo ngược danh sách: từ tập cũ nhất (1) đến mới nhất
-                    eps.reverse();
-                    servers.push({ name: svName, episodes: eps });
-                    serverIndex++;
-                }
-            }
+            searchPos = blockEnd;
         }
 
         return JSON.stringify({
