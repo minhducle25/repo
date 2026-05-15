@@ -18,47 +18,47 @@ function getManifest() {
 
 function getHomeSections() {
     return JSON.stringify([
-        { slug: 'bang-xep-hang-hoat-hinh-trung-quoc', title: 'Top 10', type: 'Horizontal', path: '' },
-        { slug: 'phim-hoan-thanh', title: 'Hoàn Thành', type: 'Horizontal', path: '' },
-        { slug: 'hh3d-danh-gia-cao', title: 'Xem Nhiều', type: 'Horizontal', path: '' },
-        { slug: 'tien-hiep', title: 'Tiên Hiệp', type: 'Horizontal', path: '' },
-        { slug: 'kiem-hiep', title: 'Kiếm Hiệp', type: 'Horizontal', path: '' },
-        { slug: '', title: 'Mới Cập Nhật', type: 'Grid', path: '' }
+        { slug: 'most-viewed', title: 'Top xem nhiều', type: 'Horizontal', path: '' },
+        { slug: 'hoan-thanh', title: 'Hoàn Thành', type: 'Horizontal', path: '' },
+        { slug: 'the-loai/kiem-hiep', title: 'Kiếm Hiệp', type: 'Horizontal', path: '' },
+        { slug: 'moi-cap-nhat', title: 'Mới Cập Nhật', type: 'Grid', path: '' }
     ]);
 }
 
 function getPrimaryCategories() {
     return JSON.stringify([
-        { name: 'Đang chiếu', slug: 'phim-dang-chieu' },
-        { name: 'Hoàn thành', slug: 'phim-hoan-thanh' },
-        { name: 'Phim lẻ', slug: 'phim-hoat-hinh-3d-le' },
-        { name: 'Huyền huyễn', slug: 'huyen-huyen' },
-        { name: 'Xuyên không', slug: 'xuyen-khong' },
-        { name: 'Trùng sinh', slug: 'trung-sinh' },
-        { name: 'Tiên hiệp', slug: 'tien-hiep' },
-        { name: 'Cổ trang', slug: 'co-trang' },
-        { name: 'Hài hước', slug: 'hai-huoc' },
-        { name: 'Kiếm hiệp', slug: 'kiem-hiep' },
-        { name: 'Hiện đại', slug: 'hien-dai' }
+        { name: 'Tu Tiên', slug: '/the-loai/tu-tien' },
+        { name: 'Kiếm Hiệp', slug: '/the-loai/kiem-hiep' },
+        { name: 'Cổ Trang', slug: '/the-loai/co-trang' },
+        { name: 'Huyền Huyễn', slug: '/the-loai/huyen-huyen' },
+        { name: 'Khoa Huyễn', slug: '/the-loai/khoa-huyen' },
+        { name: 'Kỳ Ảo', slug: '/the-loai/ky-ao' },
+        { name: 'Huyền Nghi', slug: '/the-loai/huyen-nghi' },
+        { name: 'Cạnh Kỹ', slug: '/the-loai/canh-ky' },
+        { name: 'Dã Sử', slug: '/the-loai/da-su' },
+        { name: 'Đô Thị', slug: '/the-loai/do-thi' },
+        { name: 'Đồng Nhân', slug: '/the-loai/dong-nhan' }
     ]);
 }
 
 function getFilterConfig() {
     return JSON.stringify({
         sort: [
-            { name: 'Mới cập nhật', value: 'latest' },
-            { name: 'Đánh giá cao', value: 'rating' },
-            { name: 'Xem nhiều', value: 'views' }
+            { name: 'Mới cập nhật', value: 'moi-cap-nhat' },
+            { name: 'Xem nhiều', value: 'most-viewed' }
         ],
         category: [
-            { name: "Huyền Huyễn", value: "huyen-huyen" },
-            { name: "Xuyên Không", value: "xuyen-khong" },
-            { name: "Trùng Sinh", value: "trung-sinh" },
-            { name: "Tiên Hiệp", value: "tien-hiep" },
-            { name: "Cổ Trang", value: "co-trang" },
-            { name: "Hài Hước", value: "hai-huoc" },
-            { name: "Kiếm Hiệp", value: "kiem-hiep" },
-            { name: "Hiện Đại", value: "hien-dai" }
+            { name: 'Tu Tiên', slug: '/the-loai/tu-tien' },
+            { name: 'Kiếm Hiệp', slug: '/the-loai/kiem-hiep' },
+            { name: 'Cổ Trang', slug: '/the-loai/co-trang' },
+            { name: 'Huyền Huyễn', slug: '/the-loai/huyen-huyen' },
+            { name: 'Khoa Huyễn', slug: '/the-loai/khoa-huyen' },
+            { name: 'Kỳ Ảo', slug: '/the-loai/ky-ao' },
+            { name: 'Huyền Nghi', slug: '/the-loai/huyen-nghi' },
+            { name: 'Cạnh Kỹ', slug: '/the-loai/canh-ky' },
+            { name: 'Dã Sử', slug: '/the-loai/da-su' },
+            { name: 'Đô Thị', slug: '/the-loai/do-thi' },
+            { name: 'Đồng Nhân', slug: '/the-loai/dong-nhan' }
         ]
     });
 }
@@ -69,16 +69,15 @@ function getFilterConfig() {
 
 function getUrlList(slug, filtersJson) {
     var filters = JSON.parse(filtersJson || "{}");
-    var page = filters.page || 1;
     var baseUrl = "https://hhpanda.st";
 
     // Prioritize category filter if present
     if (filters.category) {
-        return baseUrl + "/" + filters.category + "/page/" + page + "/";
+        return baseUrl + "/" + filters.category + "/";
     }
 
     if (!slug || slug === '') {
-        return baseUrl + "/page/" + page + "/";
+        return baseUrl + "/";
     }
 
     // Handle full URL slugs if passed
@@ -86,13 +85,12 @@ function getUrlList(slug, filtersJson) {
         return slug;
     }
 
-    return baseUrl + "/" + slug + "/page/" + page + "/";
+    return baseUrl + "/" + slug + "/";
 }
 
 function getUrlSearch(keyword, filtersJson) {
     var filters = JSON.parse(filtersJson || "{}");
-    var page = filters.page || 1;
-    return "https://hhpanda.st/page/" + page + "/?s=" + encodeURIComponent(keyword);
+    return "https://hhpanda.st" + "/?s=" + encodeURIComponent(keyword);
 }
 
 function getUrlDetail(slug) {
