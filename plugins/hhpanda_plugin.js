@@ -105,8 +105,8 @@ function getUrlDetail(slug) {
             var epSlug = parts[0];
             var postId = parts[1];
             var svId = parts[2];
-            // Format for player.php direct call
-            return "https://hhpanda.st/wp-content/themes/halimmovies/player.php?episode_slug=" + epSlug + "&server_id=" + svId + "&subsv_id=&post_id=" + postId;
+            // Format for new player API direct call
+            return "https://hhpanda.st/player/player.php?action=dox_ajax_player&post_id=" + postId + "&chapter_st=" + epSlug + "&type=pro&sv=" + svId;
         }
     }
 
@@ -537,7 +537,7 @@ function parseCategoriesResponse(html) {
     var seen = {};
 
     // Parse from navigation menu
-    var categoryRegex = /<a[^>]+href="https:\/\/hoathinh3d\.(?:la|my|ai)\/([^"\/]+)"[^>]*>([^<]+)<\/a>/gi;
+    var categoryRegex = /<a[^>]+href="https:\/\/hhpanda\.(?:st)\/([^"\/]+)"[^>]*>([^<]+)<\/a>/gi;
     var match;
 
     while ((match = categoryRegex.exec(html)) !== null) {
