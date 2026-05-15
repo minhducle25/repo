@@ -103,8 +103,8 @@ function getUrlDetail(slug) {
             var epSlug = parts[0];
             var postId = parts[1];
             var svId = parts[2];
-            // Format for new player API direct call
-            return "https://hhpanda.st/player/player.php?action=dox_ajax_player&post_id=" + postId + "&chapter_st=" + epSlug + "&type=pro&sv=" + svId;
+            var playerType = parts[3] || "pro"; // default quality
+            return "https://hhpanda.st/player/player.php?action=dox_ajax_player&post_id=" + postId + "&chapter_st=" + epSlug + "&type=" + playerType + "&sv=" + svId;
         }
     }
 
@@ -386,6 +386,39 @@ function parseMovieDetail(html) {
             }
 
             searchPos = blockEnd;
+        }
+
+        // Clone each language server (Vietsub, Thuyết Minh) for each quality variant
+        var qualityTypes = [
+            { type: "pro", label: "1080P V2" },
+            { type: "tiktik", label: "1080P V1" },
+            { type: "vip4k", label: "4K V1" },
+            { type: "vip4kv2", label: "4K V2" }
+        ];
+
+        if (servers.length > 0) {
+            var expandedServers = [];
+            for (var qi = 0; qi < qualityTypes.length; qi++) {
+                var qt = qualityTypes[qi];
+                for (var si = 0; si < servers.length; si++) {
+                    var origServer = servers[si];
+                    var qualifiedEps = origServer.episodes.map(function (ep) {
+                        var parts = ep.id.split("|");
+                        // Replace or add the 4th segment (type)
+                        var newId = parts[0] + "|" + (parts[1] || "") + "|" + (parts[2] || "1") + "|" + qt.type;
+                        return {
+                            id: newId,
+                            name: ep.name,
+                            slug: ep.slug
+                        };
+                    });
+                    expandedServers.push({
+                        name: origServer.name + " - " + qt.label,
+                        episodes: qualifiedEps
+                    });
+                }
+            }
+            servers = expandedServers;
         }
 
         return JSON.stringify({
