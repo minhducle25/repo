@@ -388,37 +388,22 @@ function parseMovieDetail(html) {
             searchPos = blockEnd;
         }
 
-        // Clone each language server (Vietsub, Thuyết Minh) for each quality variant
+        // Quality types available on hhpanda (used by player.php 'type' param)
         var qualityTypes = [
-            { type: "pro", label: "1080P V2" },
             { type: "tiktik", label: "1080P V1" },
+            { type: "pro", label: "1080P V2" },
             { type: "vip4k", label: "4K V1" },
             { type: "vip4kv2", label: "4K V2" }
         ];
+        var defaultType = "tiktik"; // 1080P V1
 
-        if (servers.length > 0) {
-            var expandedServers = [];
-            for (var qi = 0; qi < qualityTypes.length; qi++) {
-                var qt = qualityTypes[qi];
-                for (var si = 0; si < servers.length; si++) {
-                    var origServer = servers[si];
-                    var qualifiedEps = origServer.episodes.map(function (ep) {
-                        var parts = ep.id.split("|");
-                        // Replace or add the 4th segment (type)
-                        var newId = parts[0] + "|" + (parts[1] || "") + "|" + (parts[2] || "1") + "|" + qt.type;
-                        return {
-                            id: newId,
-                            name: ep.name,
-                            slug: ep.slug
-                        };
-                    });
-                    expandedServers.push({
-                        name: origServer.name + " - " + qt.label,
-                        episodes: qualifiedEps
-                    });
-                }
+        // Encode the default quality type into episode IDs (4th segment)
+        for (var si = 0; si < servers.length; si++) {
+            for (var ei = 0; ei < servers[si].episodes.length; ei++) {
+                var ep = servers[si].episodes[ei];
+                var parts = ep.id.split("|");
+                ep.id = parts[0] + "|" + (parts[1] || "") + "|" + (parts[2] || "1") + "|" + defaultType;
             }
-            servers = expandedServers;
         }
 
         return JSON.stringify({
@@ -428,6 +413,9 @@ function parseMovieDetail(html) {
             backdropUrl: poster,
             description: description,
             servers: servers,
+            qualityOptions: qualityTypes.map(function (qt) {
+                return { label: qt.label, value: qt.type };
+            }),
             quality: "HD",
             lang: "Vietsub",
             year: year,
