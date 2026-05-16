@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.0.2",
+        "version": "1.0.3",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -547,7 +547,9 @@ function parseDetailResponse(html) {
 
     var headers = {
         "Referer": "https://animevietsub.site/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        // Allow domains that the JW Player iframe needs to load m3u8 streams and player assets
+        "Allowed-Domains": "animevietsub.site,cdn.animevietsub.site,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,googleusercontent.com,jwpcdn.com,jwpsrv.com,jwplatform.com"
     };
 
     return JSON.stringify({
