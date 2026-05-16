@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.1.3",
+        "version": "1.1.4",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -520,11 +520,32 @@ function parseDetailResponse(html) {
         "Allowed-Domains": "storage.googleapiscdn.com,googleapiscdn.com,animevietsub.site,cdn.animevietsub.site,abyssplayer.com,abysscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,jwplatform.com,cdnjs.cloudflare.com,ajax.googleapis.com"
     };
 
-    // Extract window.PLAYER_DATA
-    var playerDataMatch = html.match(/window\.PLAYER_DATA\s*=\s*(\{[\s\S]*?\});/);
-    if (playerDataMatch) {
-        var playerData = null;
-        try { playerData = JSON.parse(playerDataMatch[1]); } catch (e) {}
+    // Extract window.PLAYER_DATA — use multiple regex strategies
+    var playerData = null;
+
+    // Strategy 1: Match from PLAYER_DATA to end of script tag (most reliable)
+    var scriptMatch = html.match(/window\.PLAYER_DATA\s*=\s*(\{[^<]+\})\s*;?\s*<\/script/);
+    if (scriptMatch) {
+        try { playerData = JSON.parse(scriptMatch[1]); } catch (e) {}
+    }
+
+    // Strategy 2: Greedy match to last }; on same logical block
+    if (!playerData) {
+        var greedyMatch = html.match(/window\.PLAYER_DATA\s*=\s*(\{"[^"]*"(?:[^}]|\}(?!;))*\});/);
+        if (greedyMatch) {
+            try { playerData = JSON.parse(greedyMatch[1]); } catch (e) {}
+        }
+    }
+
+    // Strategy 3: Original lazy match (fallback)
+    if (!playerData) {
+        var lazyMatch = html.match(/window\.PLAYER_DATA\s*=\s*(\{[\s\S]*?\});/);
+        if (lazyMatch) {
+            try { playerData = JSON.parse(lazyMatch[1]); } catch (e) {}
+        }
+    }
+
+    if (playerData) {
 
         if (playerData && playerData.link) {
             var link = playerData.link.replace(/\\\//g, "/");
@@ -545,31 +566,9 @@ function parseDetailResponse(html) {
     return "{}";
 }
 
-function parseEmbedResponse(html) {
-    if (!html) return "{}";
-
-    var headers = {
-        "Referer": "https://storage.googleapiscdn.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Allowed-Domains": "storage.googleapiscdn.com,googleapiscdn.com,animevietsub.site,abyssplayer.com,abysscdn.com"
-    };
-
-    // Try JSON
-    try {
-        var data = JSON.parse(html);
-        if (data && data.link) {
-            var link = data.link.replace(/\\\//g, "/");
-            var isEmbed = !link.match(/\.(m3u8|mp4)/i);
-            return JSON.stringify({ url: link, isEmbed: isEmbed, headers: headers });
-        }
-    } catch (e) {}
-
-    // Try m3u8/mp4
-    var m3u8Match = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
-    if (m3u8Match) return JSON.stringify({ url: m3u8Match[1], isEmbed: false, headers: headers });
-
-    return "{}";
-}
+// parseEmbedResponse intentionally NOT defined — we want the app to render
+// storage.googleapiscdn.com/player/{hash} directly in WebView without fetching it.
+// The WebView with sharedCookiesEnabled will handle CF challenge + auto-reload.
 
 // =============================================================================
 // STUB FUNCTIONS
