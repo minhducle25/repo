@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.1.1",
+        "version": "1.1.3",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -515,9 +515,9 @@ function parseDetailResponse(html) {
     if (!html) return "{}";
 
     var headers = {
-        "Referer": "https://storage.googleapiscdn.com/",
+        "Referer": "https://animevietsub.site/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Origin": "https://storage.googleapiscdn.com"
+        "Allowed-Domains": "storage.googleapiscdn.com,googleapiscdn.com,animevietsub.site,cdn.animevietsub.site,abyssplayer.com,abysscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,jwplatform.com,cdnjs.cloudflare.com,ajax.googleapis.com"
     };
 
     // Extract window.PLAYER_DATA
@@ -535,19 +535,9 @@ function parseDetailResponse(html) {
                 return JSON.stringify({ url: link, isEmbed: false, headers: headers });
             }
 
-            // For "iframe" with storage.googleapiscdn.com/player/{hash}
-            // Convert /player/{hash} to /playlist/{hash} to get direct m3u8
-            if (link.indexOf("storage.googleapiscdn.com/player/") !== -1) {
-                var m3u8Url = link.replace("/player/", "/playlist/");
-                // Remove query params (nextName, nextUrl) — not needed for m3u8
-                var qIdx = m3u8Url.indexOf("?");
-                if (qIdx !== -1) {
-                    m3u8Url = m3u8Url.substring(0, qIdx);
-                }
-                return JSON.stringify({ url: m3u8Url, isEmbed: false, headers: headers });
-            }
-
-            // For other embed links (abyssplayer.com etc)
+            // For "iframe" — embed the player page directly in WebView
+            // storage.googleapiscdn.com/player/{hash} generates JWT token and loads m3u8
+            // WebView with sharedCookiesEnabled will handle CF cookies
             return JSON.stringify({ url: link, isEmbed: true, headers: headers });
         }
     }
@@ -560,7 +550,8 @@ function parseEmbedResponse(html) {
 
     var headers = {
         "Referer": "https://storage.googleapiscdn.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        "Allowed-Domains": "storage.googleapiscdn.com,googleapiscdn.com,animevietsub.site,abyssplayer.com,abysscdn.com"
     };
 
     // Try JSON
@@ -568,12 +559,6 @@ function parseEmbedResponse(html) {
         var data = JSON.parse(html);
         if (data && data.link) {
             var link = data.link.replace(/\\\//g, "/");
-            if (link.indexOf("storage.googleapiscdn.com/player/") !== -1) {
-                var m3u8Url = link.replace("/player/", "/playlist/");
-                var qIdx = m3u8Url.indexOf("?");
-                if (qIdx !== -1) m3u8Url = m3u8Url.substring(0, qIdx);
-                return JSON.stringify({ url: m3u8Url, isEmbed: false, headers: headers });
-            }
             var isEmbed = !link.match(/\.(m3u8|mp4)/i);
             return JSON.stringify({ url: link, isEmbed: isEmbed, headers: headers });
         }
