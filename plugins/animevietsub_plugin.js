@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.1.4",
+        "version": "1.1.5",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -517,7 +517,7 @@ function parseDetailResponse(html) {
     var headers = {
         "Referer": "https://animevietsub.site/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Allowed-Domains": "storage.googleapiscdn.com,googleapiscdn.com,animevietsub.site,cdn.animevietsub.site,abyssplayer.com,abysscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,jwplatform.com,cdnjs.cloudflare.com,ajax.googleapis.com"
+        "Allowed-Domains": "storage.googleapiscdn.com,googleapiscdn.com,animevietsub.site,cdn.animevietsub.site,abyssplayer.com,abysscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,jwplatform.com,cdnjs.cloudflare.com,ajax.googleapis.com,lh3.googleusercontent.com,googleusercontent.com,cloudflareinsights.com"
     };
 
     // Extract window.PLAYER_DATA — use multiple regex strategies
