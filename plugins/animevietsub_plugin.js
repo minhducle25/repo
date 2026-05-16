@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.0.3",
+        "version": "1.0.4",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -548,9 +548,26 @@ function parseDetailResponse(html) {
     var headers = {
         "Referer": "https://animevietsub.site/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        // Allow domains that the JW Player iframe needs to load m3u8 streams and player assets
-        "Allowed-Domains": "animevietsub.site,cdn.animevietsub.site,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,googleusercontent.com,jwpcdn.com,jwpsrv.com,jwplatform.com"
+        "Allowed-Domains": "animevietsub.site,cdn.animevietsub.site,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,googleusercontent.com,jwpcdn.com,jwpsrv.com,jwplatform.com,ajax.googleapis.com"
     };
+
+    // For iframe playTech, use the episode watch page URL directly instead of the
+    // storage.googleapiscdn.com wrapper. The watch page has JW Player setup with
+    // proper authentication and CORS headers that work in WebView.
+    if (isEmbed && playTech === "iframe") {
+        // Try to extract the episode page URL from the HTML itself
+        var canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="([^"]+)"/i);
+        var episodePageUrl = canonicalMatch ? canonicalMatch[1] : "";
+
+        if (episodePageUrl && episodePageUrl.indexOf("/phim/") !== -1) {
+            // Use the actual episode page as embed source — it has the full player
+            return JSON.stringify({
+                url: episodePageUrl,
+                isEmbed: true,
+                headers: headers
+            });
+        }
+    }
 
     return JSON.stringify({
         url: link,
