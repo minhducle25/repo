@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.0.0",
+        "version": "1.0.1",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -183,7 +183,14 @@ function getUrlDetail(slug) {
         return slug;
     }
 
-    return "https://animevietsub.site/" + slug;
+    // If slug already contains a path separator (e.g., "phim/slug/tap-01-123.html")
+    // just prepend the base URL
+    if (slug.indexOf("/") !== -1) {
+        return "https://animevietsub.site/" + slug;
+    }
+
+    // Plain slug (e.g., "snowball-earth-a5904") — needs /phim/ prefix
+    return "https://animevietsub.site/phim/" + slug + "/";
 }
 
 function getUrlCategories() { return ""; }
