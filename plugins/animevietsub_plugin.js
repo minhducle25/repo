@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.0.7",
+        "version": "1.0.9",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -514,44 +514,32 @@ function parseMovieDetail(html) {
 function parseDetailResponse(html) {
     if (!html) return "{}";
 
+    // Extract the canonical episode URL — we'll load the full watch page in WebView
+    // This works because WebView has sharedCookiesEnabled and will pass CF + xac-minh
+    var canonicalMatch = html.match(/<link\s+rel="canonical"\s+href="([^"]+)"/i);
+    var ogUrlMatch = html.match(/<meta\s+property="og:url"\s+content="([^"]+)"/i);
+    var episodeUrl = "";
+
+    if (canonicalMatch && canonicalMatch[1].indexOf("/phim/") !== -1) {
+        episodeUrl = canonicalMatch[1];
+    } else if (ogUrlMatch && ogUrlMatch[1].indexOf("/phim/") !== -1) {
+        episodeUrl = ogUrlMatch[1];
+    }
+
+    if (!episodeUrl) return "{}";
+
     var headers = {
         "Referer": "https://animevietsub.site/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
-        "X-Requested-With": "XMLHttpRequest",
-        "Origin": "https://animevietsub.site",
-        "Allowed-Domains": "animevietsub.site,cdn.animevietsub.site,abyssplayer.com,abysscdn.com,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,jwplatform.com,cdnjs.cloudflare.com,ajax.googleapis.com,vip.opstream11.com,opstream11.com"
+        "Allowed-Domains": "animevietsub.site,cdn.animevietsub.site,abyssplayer.com,abysscdn.com,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,jwplatform.com,cdnjs.cloudflare.com,ajax.googleapis.com,vip.opstream11.com,opstream11.com",
+        "Custom-Js": "setTimeout(function(){try{document.querySelectorAll('.Adv,.ad-center-header,.header-ads-pc,.announcement,.Tp-Wp>header,.Body>.Content>.Adv,#invideo_wrapper,.Footer,.sidebar,.Rght,.MnBr,.Header,.ann_title,.ann_text,[class*=ads],[id*=ads]').forEach(function(e){e.remove();});var style=document.createElement('style');style.textContent='body{margin:0!important;padding:0!important;background:#000!important;overflow:hidden!important}#media-player{position:fixed!important;top:0!important;left:0!important;width:100vw!important;height:100vh!important;z-index:999999!important}.Tp-Wp,.Body,.Content{margin:0!important;padding:0!important}*:not(#media-player):not(#media-player *):not(iframe):not(video):not(style):not(script){display:none!important}#media-player,#media-player *,iframe,video{display:block!important}';document.head.appendChild(style);}catch(e){}},2000);"
     };
 
-    // Extract EpisodeID to call AJAX endpoint (returns better embed link)
-    var episodeIdMatch = html.match(/filmInfo\.episodeID\s*=\s*parseInt\(['"](\d+)['"]\)/i);
-    if (!episodeIdMatch) {
-        episodeIdMatch = html.match(/"episode_id"\s*:\s*"(\d+)"/i);
-    }
-
-    if (episodeIdMatch) {
-        var episodeId = episodeIdMatch[1];
-        return JSON.stringify({
-            url: "https://animevietsub.site/ajax/player",
-            isEmbed: true,
-            postBody: "EpisodeMess=1&EpisodeID=" + episodeId,
-            headers: headers
-        });
-    }
-
-    // Fallback: use PLAYER_DATA inline
-    var playerDataMatch = html.match(/window\.PLAYER_DATA\s*=\s*(\{[\s\S]*?\});/);
-    if (!playerDataMatch) return "{}";
-
-    var playerData = null;
-    try { playerData = JSON.parse(playerDataMatch[1]); } catch (e) { return "{}"; }
-    if (!playerData || !playerData.link) return "{}";
-
-    var link = playerData.link.replace(/\\\//g, "/");
-    var playTech = playerData.playTech || "";
-    var isEmbed = !((playTech === "api" || playTech === "all") && link.match(/\.(m3u8|mp4)/i));
-
-    return JSON.stringify({ url: link, isEmbed: isEmbed, headers: headers });
+    return JSON.stringify({
+        url: episodeUrl,
+        isEmbed: true,
+        headers: headers
+    });
 }
 
 function parseEmbedResponse(html) {
@@ -560,10 +548,10 @@ function parseEmbedResponse(html) {
     var headers = {
         "Referer": "https://animevietsub.site/",
         "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-        "Allowed-Domains": "animevietsub.site,abyssplayer.com,abysscdn.com,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com,vip.opstream11.com,opstream11.com"
+        "Allowed-Domains": "animevietsub.site,abyssplayer.com,abysscdn.com,storage.googleapiscdn.com,googleapiscdn.com,googleapis.com,gstatic.com,jwpcdn.com,jwpsrv.com"
     };
 
-    // Parse JSON response from /ajax/player
+    // Try JSON
     try {
         var data = JSON.parse(html);
         if (data && data.link) {
@@ -573,15 +561,11 @@ function parseEmbedResponse(html) {
         }
     } catch (e) {}
 
-    // HTML fallback: find m3u8/mp4
+    // Try m3u8/mp4
     var m3u8Match = html.match(/(https?:\/\/[^"'\s]+\.m3u8[^"'\s]*)/i);
     if (m3u8Match) return JSON.stringify({ url: m3u8Match[1], isEmbed: false, headers: headers });
     var mp4Match = html.match(/(https?:\/\/[^"'\s]+\.mp4[^"'\s]*)/i);
     if (mp4Match) return JSON.stringify({ url: mp4Match[1], isEmbed: false, headers: headers });
-
-    // iframe fallback
-    var iframeMatch = html.match(/<iframe[^>]+src=["']([^"']+)["']/i);
-    if (iframeMatch) return JSON.stringify({ url: iframeMatch[1], isEmbed: true, headers: headers });
 
     return "{}";
 }
