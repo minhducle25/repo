@@ -42,7 +42,7 @@ function getManifest() {
     return JSON.stringify({
         "id": "animevietsub",
         "name": "AnimeVietSub",
-        "version": "1.0.1",
+        "version": "1.0.2",
         "baseUrl": "https://animevietsub.site",
         "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
         "isEnabled": true,
@@ -183,14 +183,20 @@ function getUrlDetail(slug) {
         return slug;
     }
 
-    // If slug already contains a path separator (e.g., "phim/slug/tap-01-123.html")
-    // just prepend the base URL
-    if (slug.indexOf("/") !== -1) {
+    // If slug already contains a path with file extension (e.g., tap-01-123.html, xem-phim.html)
+    if (slug.indexOf(".html") !== -1) {
         return "https://animevietsub.site/" + slug;
     }
 
-    // Plain slug (e.g., "snowball-earth-a5904") — needs /phim/ prefix
-    return "https://animevietsub.site/phim/" + slug + "/";
+    // If slug contains "/" it's a path segment (e.g., "phim/slug")
+    if (slug.indexOf("/") !== -1) {
+        // Append xem-phim.html to get the watch page which has episode list
+        var cleanSlug = slug.replace(/\/$/, "");
+        return "https://animevietsub.site/" + cleanSlug + "/xem-phim.html";
+    }
+
+    // Plain slug (e.g., "snowball-earth-a5904") — build watch page URL
+    return "https://animevietsub.site/phim/" + slug + "/xem-phim.html";
 }
 
 function getUrlCategories() { return ""; }
