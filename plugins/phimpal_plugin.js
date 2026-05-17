@@ -640,9 +640,15 @@ function parseMovieDetail(html) {
         var seasonRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/(tv\/[^"'~]+~\d+\/season\/(\d+))["'][^>]*>[\s\S]*?<\/a>/gi;
         var seasonMatch;
         var seasonEntries = [];
+        var seenSeasonPaths = {};
         while ((seasonMatch = seasonRegex.exec(html)) !== null) {
             var seasonPath = seasonMatch[1];
             var seasonNum = seasonMatch[2];
+            // Deduplicate: skip if we already saw this season path
+            if (seenSeasonPaths[seasonPath]) {
+                continue;
+            }
+            seenSeasonPaths[seasonPath] = true;
             seasonEntries.push({
                 path: seasonPath,
                 num: seasonNum
@@ -689,6 +695,7 @@ function parseMovieDetail(html) {
                 var episodeLinkRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
                 var epLinkMatch;
                 var episodes = [];
+                var seenEpIds = {};
                 while ((epLinkMatch = episodeLinkRegex.exec(html)) !== null) {
                     var epId = epLinkMatch[1];
                     var epText = cleanText(epLinkMatch[2]);
@@ -696,6 +703,11 @@ function parseMovieDetail(html) {
                     if (!epText) {
                         continue;
                     }
+                    // Deduplicate: skip if we already saw this episode id
+                    if (seenEpIds[epId]) {
+                        continue;
+                    }
+                    seenEpIds[epId] = true;
                     episodes.push({
                         id: "watch/" + epId,
                         slug: "watch/" + epId,
