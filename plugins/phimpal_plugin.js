@@ -635,90 +635,210 @@ function parseMovieDetail(html) {
             casts = cleanText(castMatch[1]);
         }
 
-        // Detect TV show page by presence of season links matching /tv/{slug}~{id}/season/{n}
+        // PhimPal uses Next.js with __NEXT_DATA__ JSON containing episode/season info.
+        // Parse that first to get accurate data, fall back to regex if not present.
         var servers = [];
-        var seasonRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/(tv\/[^"'~]+~\d+\/season\/(\d+))["'][^>]*>[\s\S]*?<\/a>/gi;
-        var seasonMatch;
-        var seasonEntries = [];
-        var seenSeasonPaths = {};
-        while ((seasonMatch = seasonRegex.exec(html)) !== null) {
-            var seasonPath = seasonMatch[1];
-            var seasonNum = seasonMatch[2];
-            // Deduplicate: skip if we already saw this season path
-            if (seenSeasonPaths[seasonPath]) {
-                continue;
+        var nextData = null;
+        var nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+        if (nextDataMatch) {
+            try {
+                nextData = JSON.parse(nextDataMatch[1]);
+            } catch (eND) {
+                nextData = null;
             }
-            seenSeasonPaths[seasonPath] = true;
-            seasonEntries.push({
-                path: seasonPath,
-                num: seasonNum
-            });
         }
 
-        if (seasonEntries.length > 0) {
-            // TV show page: map each season to a server entry
-            for (var si = 0; si < seasonEntries.length; si++) {
-                var entry = seasonEntries[si];
-                var seasonName = "Phần " + entry.num;
-                servers.push({
-                    name: seasonName,
-                    episodes: [
-                        {
-                            id: entry.path,
-                            slug: entry.path,
-                            name: seasonName
-                        }
-                    ]
+        var apolloState = nextData && nextData.props && nextData.props.apolloState;
+        var pageProps = nextData && nextData.props && nextData.props.pageProps;
+        var pagePropsId = pageProps && pageProps.id ? String(pageProps.id) : "";
+        var pagePropsNumber = pageProps && pageProps.number !== undefined ? String(pageProps.number) : "";
+
+        // Determine page type and find the main Title.
+        // For TV show: pageProps.id = show id, no number
+        // For Season: pageProps.id = parent show id, pageProps.number = season number
+        //   → actual season Title is found via ROOT_QUERY title({number, parentId}) reference
+        // For Movie: pageProps.id = movie id, type=movie
+        var detectedType = "";
+        var mainTitle = null;
+        var mainTitleId = pagePropsId;
+
+        if (apolloState && pagePropsId) {
+            // For season pages, look up the season Title via ROOT_QUERY reference
+            if (pagePropsNumber && apolloState.ROOT_QUERY) {
+                var seasonQueryKey = 'title({"number":"' + pagePropsNumber + '","parentId":"' + pagePropsId + '"})';
+                var seasonRef = apolloState.ROOT_QUERY[seasonQueryKey];
+                if (seasonRef && seasonRef.id) {
+                    var seasonTitle = apolloState[seasonRef.id];
+                    if (seasonTitle) {
+                        mainTitle = seasonTitle;
+                        mainTitleId = seasonTitle.id ? String(seasonTitle.id) : pagePropsId;
+                        detectedType = mainTitle.type || "season";
+                    }
+                }
+            }
+            // Fallback: direct lookup by pageProps.id
+            if (!mainTitle) {
+                mainTitle = apolloState["Title:" + pagePropsId];
+                if (mainTitle) {
+                    detectedType = mainTitle.type || "";
+                    mainTitleId = pagePropsId;
+                }
+            }
+        }
+
+        if (detectedType === "season" && apolloState) {
+            // Season page: extract episodes from Title:{seasonId}.episodes.* entries
+            var seasonId = mainTitleId;
+            var episodes = [];
+            var epIdx = 0;
+            while (true) {
+                var epKey = "Title:" + seasonId + ".episodes." + epIdx;
+                var ep = apolloState[epKey];
+                if (!ep) break;
+                var epNum = (ep.number !== undefined && ep.number !== null) ? ep.number : (epIdx + 1);
+                var epName = ep.name || "";
+                // Compute watch URL: pattern is /watch/{seasonId + epNum - 1}
+                // Verified from PhimPal: season Title:4587, ep 1 → /watch/4587, ep 2 → /watch/4588, etc.
+                var watchId = parseInt(seasonId, 10) + epNum - 1;
+                var displayName = epName ? ("Tập " + epNum + ": " + epName) : ("Tập " + epNum);
+                episodes.push({
+                    id: "watch/" + watchId,
+                    slug: "watch/" + watchId,
+                    name: displayName
                 });
+                epIdx++;
             }
-        } else {
-            // Movie page: find "XEM PHIM" watch link with /watch/{id} href
-            var watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>[\s\S]*?XEM\s*PHIM[\s\S]*?<\/a>/i);
-            if (!watchMatch) {
-                // Try alternate pattern: text first, then check href
-                watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>[^<]*XEM[^<]*PHIM[^<]*<\/a>/i);
-            }
-            if (watchMatch) {
-                var watchId = watchMatch[1];
+            if (episodes.length > 0) {
                 servers.push({
                     name: "PhimPal",
+                    episodes: episodes
+                });
+            }
+        } else if (detectedType === "show" && apolloState) {
+            // TV show detail page: find seasons via parent reference
+            var showId = mainTitleId;
+            // Slug from URL — try to extract from canonical link or page meta
+            var showSlug = "";
+            var canonicalMatch = html.match(/<link[^>]*rel=["']canonical["'][^>]*href=["']([^"']+)["']/i);
+            if (canonicalMatch) {
+                var slugFromUrl = canonicalMatch[1].match(/\/(tv\/[^"'~]+~\d+)/);
+                if (slugFromUrl) showSlug = slugFromUrl[1];
+            }
+            if (!showSlug && mainTitle && mainTitle.id) {
+                // Fallback: build from name
+                var nameForSlug = (mainTitle.nameEn || mainTitle.nameVi || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+                if (nameForSlug) showSlug = "tv/" + nameForSlug + "~" + mainTitle.id;
+            }
+            // Collect Title:* entries that are seasons of this show
+            var seasonList = [];
+            for (var apKey in apolloState) {
+                if (!apolloState.hasOwnProperty(apKey)) continue;
+                if (apKey.indexOf("Title:") !== 0) continue;
+                if (apKey.indexOf(".") !== -1) continue;
+                var apEntry = apolloState[apKey];
+                if (!apEntry || apEntry.type !== "season") continue;
+                if (apEntry.parent && apEntry.parent.id === ("Title:" + showId)) {
+                    seasonList.push({
+                        num: apEntry.number || 1,
+                        path: showSlug + "/season/" + (apEntry.number || 1)
+                    });
+                }
+            }
+            // Sort seasons by number
+            seasonList.sort(function(a, b) { return a.num - b.num; });
+            for (var sli = 0; sli < seasonList.length; sli++) {
+                var sEntry = seasonList[sli];
+                var sName = "Phần " + sEntry.num;
+                servers.push({
+                    name: sName,
                     episodes: [
                         {
-                            id: "watch/" + watchId,
-                            slug: "watch/" + watchId,
-                            name: "Tập 1"
+                            id: sEntry.path,
+                            slug: sEntry.path,
+                            name: sName
                         }
                     ]
                 });
-            } else {
-                // Season page: detect multiple episode links matching /watch/{id}
-                var episodeLinkRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-                var epLinkMatch;
-                var episodes = [];
-                var seenEpIds = {};
-                while ((epLinkMatch = episodeLinkRegex.exec(html)) !== null) {
-                    var epId = epLinkMatch[1];
-                    var epText = cleanText(epLinkMatch[2]);
-                    // Skip links with empty titles
-                    if (!epText) {
-                        continue;
-                    }
-                    // Deduplicate: skip if we already saw this episode id
-                    if (seenEpIds[epId]) {
-                        continue;
-                    }
-                    seenEpIds[epId] = true;
-                    episodes.push({
-                        id: "watch/" + epId,
-                        slug: "watch/" + epId,
-                        name: epText
+            }
+            // Fallback: if we couldn't build seasons from apolloState, use childrenCount
+            if (servers.length === 0 && mainTitle && mainTitle.childrenCount && showSlug) {
+                for (var ci = 1; ci <= mainTitle.childrenCount; ci++) {
+                    var cPath = showSlug + "/season/" + ci;
+                    var cName = "Phần " + ci;
+                    servers.push({
+                        name: cName,
+                        episodes: [
+                            { id: cPath, slug: cPath, name: cName }
+                        ]
                     });
                 }
-                if (episodes.length > 0) {
+            }
+        }
+
+        // If __NEXT_DATA__ parsing didn't yield servers, fall back to regex-based detection.
+        if (servers.length === 0) {
+            // Detect TV show page by presence of season links matching /tv/{slug}~{id}/season/{n}
+            var seasonRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/(tv\/[^"'~]+~\d+\/season\/(\d+))["'][^>]*>[\s\S]*?<\/a>/gi;
+            var seasonMatch;
+            var seasonEntries = [];
+            var seenSeasonPaths = {};
+            while ((seasonMatch = seasonRegex.exec(html)) !== null) {
+                var seasonPath = seasonMatch[1];
+                var seasonNum = seasonMatch[2];
+                if (seenSeasonPaths[seasonPath]) continue;
+                seenSeasonPaths[seasonPath] = true;
+                seasonEntries.push({ path: seasonPath, num: seasonNum });
+            }
+
+            if (seasonEntries.length > 0) {
+                for (var si2 = 0; si2 < seasonEntries.length; si2++) {
+                    var entry2 = seasonEntries[si2];
+                    var seasonName2 = "Phần " + entry2.num;
+                    servers.push({
+                        name: seasonName2,
+                        episodes: [
+                            { id: entry2.path, slug: entry2.path, name: seasonName2 }
+                        ]
+                    });
+                }
+            } else {
+                // Movie page: find "XEM PHIM" watch link with /watch/{id} href
+                var watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>[\s\S]*?XEM\s*PHIM[\s\S]*?<\/a>/i);
+                if (!watchMatch) {
+                    watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>[^<]*XEM[^<]*PHIM[^<]*<\/a>/i);
+                }
+                if (watchMatch) {
+                    var watchId2 = watchMatch[1];
                     servers.push({
                         name: "PhimPal",
-                        episodes: episodes
+                        episodes: [
+                            { id: "watch/" + watchId2, slug: "watch/" + watchId2, name: "Tập 1" }
+                        ]
                     });
+                } else {
+                    // Season page: detect multiple episode links matching /watch/{id}
+                    var episodeLinkRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+                    var epLinkMatch;
+                    var fbEpisodes = [];
+                    var seenEpIds = {};
+                    while ((epLinkMatch = episodeLinkRegex.exec(html)) !== null) {
+                        var epId = epLinkMatch[1];
+                        var epText = cleanText(epLinkMatch[2]);
+                        if (!epText) continue;
+                        if (seenEpIds[epId]) continue;
+                        seenEpIds[epId] = true;
+                        fbEpisodes.push({
+                            id: "watch/" + epId,
+                            slug: "watch/" + epId,
+                            name: epText
+                        });
+                    }
+                    if (fbEpisodes.length > 0) {
+                        servers.push({
+                            name: "PhimPal",
+                            episodes: fbEpisodes
+                        });
+                    }
                 }
             }
         }
@@ -750,18 +870,43 @@ function parseMovieDetail(html) {
 
 /**
  * Parse watch page HTML to extract stream URL, embed status, and headers.
- * Detection priority:
- *   1. <video> src with .m3u8 or .mp4
- *   2. <source> src with .m3u8 or .mp4
- *   3. Inline JS containing .m3u8 or .mp4 URL (var sources, playerInstance.setup)
- *   4. <iframe> src (isEmbed = true)
+ * 
+ * PhimPal uses a GraphQL API at /b/g to serve stream URLs.
+ * The watch page HTML itself doesn't contain the stream — it's loaded via JS.
+ * 
+ * Strategy:
+ *   1. Try to find stream URL directly in HTML (video/source/inline JS)
+ *   2. If not found, extract the episode ID from __NEXT_DATA__ or page structure
+ *      and return an embed result pointing to the GraphQL API with TitleWatch query
+ *      so that the app's embed chain will fetch it and pass to parseEmbedResponse.
  *
- * Returns JSON string with {url, isEmbed, headers} or "{}" if no stream found.
+ * Returns JSON string with {url, isEmbed, headers, postBody?} or "{}" if nothing found.
  */
 function parseDetailResponse(html) {
     try {
         if (html === null || html === undefined || html === "" || typeof html !== "string") {
             return "{}";
+        }
+
+        // First, try to parse as GraphQL JSON response (in case app already fetched the API)
+        if (html.indexOf('"data"') !== -1 && html.indexOf('"srcUrl"') !== -1) {
+            try {
+                var gqlData = JSON.parse(html);
+                if (gqlData && gqlData.data && gqlData.data.title && gqlData.data.title.srcUrl) {
+                    var titleData = gqlData.data.title;
+                    var gqlResult = {
+                        url: titleData.srcUrl,
+                        isEmbed: false,
+                        headers: {
+                            "Referer": "https://legacy.phimpal.com/",
+                            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                        }
+                    };
+                    return JSON.stringify(gqlResult);
+                }
+            } catch (jsonErr) {
+                // Not valid JSON, continue with HTML parsing
+            }
         }
 
         var streamUrl = "";
@@ -786,17 +931,11 @@ function parseDetailResponse(html) {
         }
 
         // Priority 3: Inline JS containing .m3u8 or .mp4 URL
-        // Look for patterns like: var sources = [{file: "..."}]
-        // or: playerInstance.setup({ file: '...' })
         if (!streamUrl) {
-            var jsUrlMatch = html.match(/["']([^"']*\.(?:m3u8|mp4)[^"']*)["']/i);
+            var jsUrlMatch = html.match(/["'](https?:\/\/[^"']*\.(?:m3u8|mp4)[^"']*)["']/i);
             if (jsUrlMatch && jsUrlMatch[1]) {
-                // Verify it looks like a URL (starts with http or /)
-                var candidate = jsUrlMatch[1];
-                if (candidate.indexOf("http") === 0 || candidate.indexOf("/") === 0) {
-                    streamUrl = candidate;
-                    isEmbed = false;
-                }
+                streamUrl = jsUrlMatch[1];
+                isEmbed = false;
             }
         }
 
@@ -809,8 +948,51 @@ function parseDetailResponse(html) {
             }
         }
 
-        // If no stream URL found, return "{}"
+        // Priority 5: PhimPal GraphQL API fallback
+        // If no stream found in HTML, extract episode ID and construct GraphQL request
         if (!streamUrl) {
+            var episodeId = "";
+            // Try to get ID from __NEXT_DATA__
+            var nextDataMatch2 = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+            if (nextDataMatch2) {
+                try {
+                    var nd = JSON.parse(nextDataMatch2[1]);
+                    if (nd && nd.props && nd.props.pageProps && nd.props.pageProps.id) {
+                        episodeId = String(nd.props.pageProps.id);
+                    }
+                } catch (ndErr) {}
+            }
+            // Fallback: try to extract from URL in page (e.g., canonical link or og:url)
+            if (!episodeId) {
+                var watchUrlMatch = html.match(/\/watch\/(\d+)/);
+                if (watchUrlMatch) {
+                    episodeId = watchUrlMatch[1];
+                }
+            }
+
+            if (episodeId) {
+                // Construct GraphQL TitleWatch query
+                var gqlQuery = "query TitleWatch($id: String!, $server: String) { title(id: $id, server: $server) { id srcUrl srcServer type number nextEpisodeId parent { id number parent { id nameEn nameVi __typename } __typename } __typename } }";
+                var gqlBody = JSON.stringify({
+                    operationName: "TitleWatch",
+                    variables: { id: episodeId, server: "1" },
+                    query: gqlQuery
+                });
+
+                var embedResult = {
+                    url: BASE_URL + "/b/g",
+                    isEmbed: true,
+                    postBody: gqlBody,
+                    headers: {
+                        "Content-Type": "application/json",
+                        "Referer": "https://legacy.phimpal.com/watch/" + episodeId,
+                        "Origin": "https://legacy.phimpal.com",
+                        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+                    }
+                };
+                return JSON.stringify(embedResult);
+            }
+
             return "{}";
         }
 
@@ -822,48 +1004,32 @@ function parseDetailResponse(html) {
         var trackMatch;
         while ((trackMatch = trackRegex.exec(html)) !== null) {
             var trackTag = trackMatch[0];
-            // Extract src attribute — must end in .srt or .vtt
             var trackSrcMatch = trackTag.match(/\ssrc=["']([^"']*\.(?:srt|vtt)[^"']*)["']/i);
-            if (!trackSrcMatch) {
-                continue;
-            }
+            if (!trackSrcMatch) continue;
             var trackSrc = trackSrcMatch[1];
-            // Extract srclang attribute
             var trackLangMatch = trackTag.match(/\ssrclang=["']([^"']+)["']/i);
             var trackLang = "";
-            if (trackLangMatch) {
-                trackLang = trackLangMatch[1];
-            }
-            // Fallback to label attribute if srclang is missing
+            if (trackLangMatch) trackLang = trackLangMatch[1];
             if (!trackLang) {
                 var trackLabelMatch = trackTag.match(/\slabel=["']([^"']+)["']/i);
-                if (trackLabelMatch) {
-                    trackLang = trackLabelMatch[1];
-                }
+                if (trackLabelMatch) trackLang = trackLabelMatch[1];
             }
             if (trackLang && trackSrc) {
-                subtitles.push({
-                    lang: trackLang,
-                    url: absoluteUrl(trackSrc)
-                });
+                subtitles.push({ lang: trackLang, url: absoluteUrl(trackSrc) });
             }
         }
 
-        // Method 2: Extract inline JS subtitle metadata (array of {lang, file} objects)
-        // Matches patterns like: var subtitles = [{lang: "vi", file: "/subtitles/vi/12345.vtt"}];
-        // or: var subtitles = [{lang:"vi",file:"/subtitles/vi/12345.vtt"}];
+        // Method 2: Extract inline JS subtitle metadata
         var jsSubRegex = /(?:var\s+\w+\s*=\s*|subtitles\s*[:=]\s*)\[([^\]]*\{[^\]]*lang[^\]]*file[^\]]*\}[^\]]*)\]/gi;
         var jsSubMatch;
         while ((jsSubMatch = jsSubRegex.exec(html)) !== null) {
             var arrContent = jsSubMatch[1];
-            // Extract individual {lang: "...", file: "..."} objects
             var objRegex = /\{\s*(?:lang\s*:\s*["']([^"']+)["']\s*,\s*file\s*:\s*["']([^"']+)["']|file\s*:\s*["']([^"']+)["']\s*,\s*lang\s*:\s*["']([^"']+)["'])\s*\}/gi;
             var objMatch;
             while ((objMatch = objRegex.exec(arrContent)) !== null) {
                 var subLang = objMatch[1] || objMatch[4] || "";
                 var subFile = objMatch[2] || objMatch[3] || "";
                 if (subLang && subFile) {
-                    // Check if this subtitle is already in the array (avoid duplicates)
                     var isDuplicate = false;
                     for (var di = 0; di < subtitles.length; di++) {
                         if (subtitles[di].lang === subLang && subtitles[di].url === absoluteUrl(subFile)) {
@@ -872,10 +1038,7 @@ function parseDetailResponse(html) {
                         }
                     }
                     if (!isDuplicate) {
-                        subtitles.push({
-                            lang: subLang,
-                            url: absoluteUrl(subFile)
-                        });
+                        subtitles.push({ lang: subLang, url: absoluteUrl(subFile) });
                     }
                 }
             }
@@ -890,10 +1053,47 @@ function parseDetailResponse(html) {
             }
         };
 
-        // Only include subtitles field if tracks were found
         if (subtitles.length > 0) {
             result.subtitles = subtitles;
         }
+
+        return JSON.stringify(result);
+    } catch (e) {
+        return "{}";
+    }
+}
+
+// =============================================================================
+// EMBED RESPONSE PARSER (GraphQL API response)
+// =============================================================================
+
+/**
+ * Parse the GraphQL API response from /b/g (TitleWatch query).
+ * Extracts srcUrl (m3u8 stream) from the JSON response.
+ * 
+ * Expected input: JSON string like:
+ * {"data":{"title":{"srcUrl":"https://m.katcdn.xyz/...m3u8","srcServer":"3",...}}}
+ */
+function parseEmbedResponse(json) {
+    try {
+        if (!json || typeof json !== "string") {
+            return "{}";
+        }
+
+        var data = JSON.parse(json);
+        if (!data || !data.data || !data.data.title || !data.data.title.srcUrl) {
+            return "{}";
+        }
+
+        var title = data.data.title;
+        var result = {
+            url: title.srcUrl,
+            isEmbed: false,
+            headers: {
+                "Referer": "https://legacy.phimpal.com/",
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+            }
+        };
 
         return JSON.stringify(result);
     } catch (e) {
