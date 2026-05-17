@@ -697,13 +697,13 @@ function parseMovieDetail(html) {
                 if (!ep) break;
                 var epNum = (ep.number !== undefined && ep.number !== null) ? ep.number : (epIdx + 1);
                 var epName = ep.name || "";
-                // Compute watch URL: pattern is /watch/{seasonId + epNum - 1}
-                // Verified from PhimPal: season Title:4587, ep 1 → /watch/4587, ep 2 → /watch/4588, etc.
-                var watchId = parseInt(seasonId, 10) + epNum - 1;
+                // Use season title ID + episode number as placeholder ID.
+                // The hook will call EpisodesWatch GraphQL to get real episode IDs and replace them.
+                var placeholderId = "watch/" + seasonId + ":" + epNum;
                 var displayName = epName ? ("Tập " + epNum + ": " + epName) : ("Tập " + epNum);
                 episodes.push({
-                    id: "watch/" + watchId,
-                    slug: "watch/" + watchId,
+                    id: placeholderId,
+                    slug: placeholderId,
                     name: displayName
                 });
                 epIdx++;
