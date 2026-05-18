@@ -6,12 +6,11 @@ function getManifest() {
     return JSON.stringify({
         "id": "nguonc",
         "name": "Phim NguonC",
-        "version": "1.0.8",
+        "version": "1.0.7",
         "baseUrl": "https://phim.nguonc.com",
-        "iconUrl": "https://raw.githubusercontent.com/youngbi/repo/main/plugins/nguonC.png",
+        "iconUrl": "https://stpaulclinic.vn/vaapp/plugins/nguonC.png",
         "isEnabled": true,
-        "type": "MOVIE",
-        "playerType": "embed"
+        "type": "MOVIE"
     });
 }
 
@@ -54,7 +53,6 @@ function getUrlList(slug, filtersJson) {
     try {
         var filters = JSON.parse(filtersJson || "{}");
         var page = filters.page || 1;
-        var sort = filters.sort || "updated"; // updated, view, year
 
         // Handle "Phim Mới Cập Nhật" specially if no filter
         if (slug === 'phim-moi-cap-nhat' && !filters.category && !filters.country && !filters.year) {
@@ -63,24 +61,24 @@ function getUrlList(slug, filtersJson) {
 
         // Priority 1: Category Support //v1/api/the-loai/{slug}
         if (filters.category) {
-            return "https://phim.nguonc.com/api/films/the-loai/" + filters.category + "?page=" + page + "&sort=" + sort;
+            return "https://phim.nguonc.com/api/films/the-loai/" + filters.category + "?page=" + page;
         }
 
         // Priority 2: Country Support //v1/api/quoc-gia/{slug}
         if (filters.country) {
-            return "https://phim.nguonc.com/api/films/quoc-gia/" + filters.country + "?page=" + page + "&sort=" + sort;
+            return "https://phim.nguonc.com/api/films/quoc-gia/" + filters.country + "?page=" + page;
         }
 
         // Priority 3: Year Support //v1/api/nam-phat-hanh/{year}
         if (filters.year) {
-            return "https://phim.nguonc.com/api/films/nam-phat-hanh/" + filters.year + "?page=" + page + "&sort=" + sort;
+            return "https://phim.nguonc.com/api/films/nam-phat-hanh/" + filters.year + "?page=" + page;
         }
 
         // --- Slug-based Logic (if no active filter) ---
 
         // Handle Years (4 digits)
         if (/^\d{4}$/.test(slug)) {
-            return "https://phim.nguonc.com/api/films/nam-phat-hanh/" + slug + "?page=" + page + "&sort=" + sort;
+            return "https://phim.nguonc.com/api/films/nam-phat-hanh/" + slug + "?page=" + page;
         }
 
         // Handle specific Lists (Danh sách)
@@ -92,7 +90,7 @@ function getUrlList(slug, filtersJson) {
         if (listSlugs.indexOf(slug) >= 0) {
             // If slug is 'hoat-hinh', prefer 'the-loai' logic unless we know it's a list
             if (slug !== 'hoat-hinh') {
-                return "https://phim.nguonc.com/api/films/danh-sach/" + slug + "?page=" + page + "&sort=" + sort;
+                return "https://phim.nguonc.com/api/films/danh-sach/" + slug + "?page=" + page;
             }
         }
 
@@ -103,11 +101,11 @@ function getUrlList(slug, filtersJson) {
             'philippines', 'an-do', 'quoc-gia-khac'
         ];
         if (countrySlugs.indexOf(slug) >= 0) {
-            return "https://phim.nguonc.com/api/films/quoc-gia/" + slug + "?page=" + page + "&sort=" + sort;
+            return "https://phim.nguonc.com/api/films/quoc-gia/" + slug + "?page=" + page;
         }
 
         // Default to Genres (Thể loại)
-        return "https://phim.nguonc.com/api/films/the-loai/" + slug + "?page=" + page + "&sort=" + sort;
+        return "https://phim.nguonc.com/api/films/the-loai/" + slug + "?page=" + page;
 
     } catch (e) {
         return "https://phim.nguonc.com/api/films/phim-moi-cap-nhat?page=1";
@@ -217,9 +215,8 @@ function parseMovieDetail(apiResponseJson) {
                         var embed = ep.embed || ep.link_embed || "";
                         var m3u8 = ep.m3u8 || ep.link_m3u8 || "";
 
-                        // Use Embed URL as ID to allow scraping Referer/M3u8 details
-                        // If no embed, use m3u8 directly.
-                        var link = embed || m3u8;
+                        // Prefer m3u8 direct stream over embed URL for better native player support
+                        var link = m3u8 || embed;
 
                         if (link) {
                             episodes.push({
