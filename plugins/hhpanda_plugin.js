@@ -8,7 +8,7 @@ function getManifest() {
         "name": "HH3D - Hoạt Hình 3D",
         "version": "1.0.3",
         "baseUrl": "https://hhpanda.st",
-        "iconUrl": "https://scontent.fbne9-2.fna.fbcdn.net/v/t39.30808-6/246700273_106509025160460_1507655162778832727_n.png",
+        "iconUrl": "https://hhpanda.st/wp-content/uploads/2024/10/apple-touch-icon.png",
         "isEnabled": true,
         "isAdult": false,
         "type": "MOVIE",
