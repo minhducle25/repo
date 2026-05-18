@@ -376,96 +376,77 @@ function _parseListingHtml(html) {
     try {
         var items = [];
 
-        // Parse column blocks: each movie card is inside a <div class="column ...">
-        // containing an <a class="cover" href="/{type}/{slug}~{id}"> with <img> for poster
-        // and <h3 class="name vi"><a>title</a></h3> for Vietnamese title
-        var columnRegex = /<div[^>]*class="[^"]*column[^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]*class="[^"]*column|<\/div>\s*<\/div>)/gi;
-        var columnMatch;
-
-        while ((columnMatch = columnRegex.exec(html)) !== null) {
-            var block = columnMatch[1];
-
-            // Extract ID from cover link href: /movie/{slug}~{id} or /tv/{slug}~{id}
-            var hrefMatch = block.match(/<a[^>]*class=["'][^"']*cover[^"']*["'][^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["']/i);
-            if (!hrefMatch) {
-                // Fallback: any anchor with movie/tv path
-                hrefMatch = block.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["']/i);
-            }
-            if (!hrefMatch) continue;
-
-            var id = hrefMatch[1];
-
-            // Extract poster from img inside the block
-            var posterUrl = "";
-            var imgMatch = block.match(/<img[^>]*src=["']([^"']+)["'][^>]*>/i);
-            if (imgMatch) {
-                posterUrl = absoluteUrl(imgMatch[1]);
-            }
-
-            // Extract Vietnamese title from <h3 class="name vi">
-            var title = "";
-            var viMatch = block.match(/<h3[^>]*class=["'][^"']*name\s+vi[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i);
-            if (viMatch) {
-                title = cleanText(viMatch[1]);
-            }
-
-            // Extract English/origin name from <h3 class="name en">
-            var originName = "";
-            var enMatch = block.match(/<h3[^>]*class=["'][^"']*name\s+en[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i);
-            if (enMatch) {
-                originName = cleanText(enMatch[1]);
-            }
-
-            // If no vi title, use en title
-            if (!title && originName) {
-                title = originName;
-                originName = "";
-            }
-
-            if (!title || !id) continue;
-
-            // Avoid duplicates (same id can appear in multiple sections)
-            var isDuplicate = false;
-            for (var di = 0; di < items.length; di++) {
-                if (items[di].id === id) { isDuplicate = true; break; }
-            }
-            if (isDuplicate) continue;
-
-            items.push({
-                id: id,
-                title: title,
-                originName: originName,
-                posterUrl: posterUrl
-            });
-        }
-
-        // Fallback: if column parsing found nothing, try __NEXT_DATA__ apolloState
-        if (items.length === 0) {
-            var nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
-            if (nextDataMatch) {
-                try {
-                    var nextData = JSON.parse(nextDataMatch[1]);
-                    var apolloState = nextData && nextData.props && nextData.props.apolloState;
-                    if (apolloState) {
-                        for (var key in apolloState) {
-                            if (!apolloState.hasOwnProperty(key)) continue;
-                            if (key.indexOf("Title:") !== 0) continue;
-                            if (key.indexOf(".") !== -1) continue;
-                            var entry = apolloState[key];
-                            if (!entry || !entry.id || !entry.nameVi) continue;
-                            var type = entry.type === "movie" ? "movie" : "tv";
-                            var slug = (entry.nameEn || entry.nameVi || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
-                            var itemId = type + "/" + slug + "~" + entry.id;
-                            var tmdbPoster = entry.tmdbPoster ? "https://image.tmdb.org/t/p/w500" + entry.tmdbPoster : "";
-                            items.push({
-                                id: itemId,
-                                title: entry.nameVi || entry.nameEn || "",
-                                originName: entry.nameEn || "",
-                                posterUrl: tmdbPoster
-                            });
+        // Primary: parse __NEXT_DATA__ apolloState (most reliable)
+        var nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+        if (nextDataMatch) {
+            try {
+                var nextData = JSON.parse(nextDataMatch[1]);
+                var apolloState = nextData && nextData.props && nextData.props.apolloState;
+                if (apolloState) {
+                    // Collect Title entries in order they appear in query results
+                    var titleIds = [];
+                    for (var qKey in apolloState) {
+                        if (!apolloState.hasOwnProperty(qKey)) continue;
+                        var qVal = apolloState[qKey];
+                        if (qVal && qVal.nodes && Array.isArray(qVal.nodes)) {
+                            for (var ni = 0; ni < qVal.nodes.length; ni++) {
+                                var nodeRef = qVal.nodes[ni];
+                                if (nodeRef && nodeRef.id && nodeRef.id.indexOf("Title:") === 0) {
+                                    var tid = nodeRef.id.replace("Title:", "");
+                                    if (titleIds.indexOf(tid) === -1) titleIds.push(tid);
+                                }
+                            }
                         }
                     }
-                } catch (e) {}
+
+                    for (var ti = 0; ti < titleIds.length; ti++) {
+                        var entry = apolloState["Title:" + titleIds[ti]];
+                        if (!entry || !entry.id) continue;
+                        var nameVi = entry.nameVi || entry.nameEn || "";
+                        var nameEn = entry.nameEn || "";
+                        if (!nameVi) continue;
+
+                        var type = entry.type === "movie" ? "movie" : "tv";
+                        var slug = (nameEn || nameVi).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+                        var itemId = type + "/" + slug + "~" + entry.id;
+                        var tmdbPoster = entry.tmdbPoster ? "https://image.tmdb.org/t/p/w500" + entry.tmdbPoster : "";
+
+                        items.push({
+                            id: itemId,
+                            title: nameVi,
+                            originName: nameEn,
+                            posterUrl: tmdbPoster,
+                            year: entry.publishDate ? parseInt(entry.publishDate.substring(0, 4), 10) || 0 : 0
+                        });
+                    }
+                }
+            } catch (e) {}
+        }
+
+        // Fallback: parse HTML img tags if __NEXT_DATA__ didn't work
+        if (items.length === 0) {
+            var coverRegex = /<a[^>]*class=["'][^"']*cover[^"']*["'][^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+            var coverMatch;
+            while ((coverMatch = coverRegex.exec(html)) !== null) {
+                var cId = coverMatch[1];
+                var cInner = coverMatch[2];
+                var cPoster = "";
+                var cImg = cInner.match(/<img[^>]*src=["']([^"']+)["']/i);
+                if (cImg) cPoster = absoluteUrl(cImg[1]);
+                var cTitle = "";
+                var cAlt = cInner.match(/<img[^>]*alt=["']([^"']+)["']/i);
+                if (cAlt) cTitle = cleanText(cAlt[1]);
+
+                if (cId && cPoster) {
+                    // Check if already added
+                    var exists = false;
+                    for (var ei = 0; ei < items.length; ei++) {
+                        if (items[ei].id === cId) { exists = true; break; }
+                    }
+                    if (!exists) {
+                        items.push({ id: cId, title: cTitle || cId, posterUrl: cPoster });
+                    }
+                }
             }
         }
 
