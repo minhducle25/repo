@@ -44,7 +44,7 @@ function getManifest() {
         "name": "AnimeVietSub",
         "version": "1.1.5",
         "baseUrl": "https://animevietsub.site",
-        "iconUrl": "https://cdn.animevietsub.site/data/logo/logoz.png",
+        "iconUrl": "https://raw.githubusercontent.com/minhducle25/repo/refs/heads/main/plugins/logoz.png",
         "isEnabled": true,
         "isAdult": false,
         "type": "MOVIE",
