@@ -376,79 +376,97 @@ function _parseListingHtml(html) {
     try {
         var items = [];
 
-        // Match anchor elements whose href contains /movie/{slug}~{id} or /tv/{slug}~{id}
-        // The pattern captures the card/item block containing the anchor, poster image, and metadata
-        var cardRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-        var cardMatch;
+        // Parse column blocks: each movie card is inside a <div class="column ...">
+        // containing an <a class="cover" href="/{type}/{slug}~{id}"> with <img> for poster
+        // and <h3 class="name vi"><a>title</a></h3> for Vietnamese title
+        var columnRegex = /<div[^>]*class="[^"]*column[^"]*"[^>]*>([\s\S]*?)<\/div>\s*(?=<div[^>]*class="[^"]*column|<\/div>\s*<\/div>)/gi;
+        var columnMatch;
 
-        while ((cardMatch = cardRegex.exec(html)) !== null) {
-            var id = cardMatch[1];
-            var innerHtml = cardMatch[2];
+        while ((columnMatch = columnRegex.exec(html)) !== null) {
+            var block = columnMatch[1];
 
-            // Extract title - look for text content, heading elements, or title attributes
-            var title = "";
-
-            // Try to find title in heading elements inside the anchor
-            var headingMatch = innerHtml.match(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/i);
-            if (headingMatch) {
-                title = cleanText(headingMatch[1]);
+            // Extract ID from cover link href: /movie/{slug}~{id} or /tv/{slug}~{id}
+            var hrefMatch = block.match(/<a[^>]*class=["'][^"']*cover[^"']*["'][^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["']/i);
+            if (!hrefMatch) {
+                // Fallback: any anchor with movie/tv path
+                hrefMatch = block.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["']/i);
             }
+            if (!hrefMatch) continue;
 
-            // If no heading, try to find a title/alt attribute or span with title class
-            if (!title) {
-                var titleSpanMatch = innerHtml.match(/<(?:span|p|div)[^>]*class="[^"]*title[^"]*"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i);
-                if (titleSpanMatch) {
-                    title = cleanText(titleSpanMatch[1]);
-                }
-            }
+            var id = hrefMatch[1];
 
-            // If still no title, use the cleaned text content of the anchor
-            if (!title) {
-                // Remove img tags first to avoid alt text pollution, then clean
-                var textContent = innerHtml.replace(/<img[^>]*>/gi, "");
-                title = cleanText(textContent);
-            }
-
-            // Skip items with empty title
-            if (!title) {
-                continue;
-            }
-
-            // Extract poster URL from img element
+            // Extract poster from img inside the block
             var posterUrl = "";
-            var imgMatch = innerHtml.match(/<img[^>]*src=["']([^"']+)["'][^>]*>/i);
+            var imgMatch = block.match(/<img[^>]*src=["']([^"']+)["'][^>]*>/i);
             if (imgMatch) {
                 posterUrl = absoluteUrl(imgMatch[1]);
             }
-            // Also check data-src for lazy-loaded images
-            if (!posterUrl) {
-                var dataSrcMatch = innerHtml.match(/<img[^>]*data-src=["']([^"']+)["'][^>]*>/i);
-                if (dataSrcMatch) {
-                    posterUrl = absoluteUrl(dataSrcMatch[1]);
-                }
+
+            // Extract Vietnamese title from <h3 class="name vi">
+            var title = "";
+            var viMatch = block.match(/<h3[^>]*class=["'][^"']*name\s+vi[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i);
+            if (viMatch) {
+                title = cleanText(viMatch[1]);
             }
 
-            // Extract originName (Vietnamese title) - often in a secondary element
+            // Extract English/origin name from <h3 class="name en">
             var originName = "";
-            var originMatch = innerHtml.match(/<(?:span|p|div)[^>]*class="[^"]*(?:origin|vietnamese|sub-title|alt-title)[^"]*"[^>]*>([\s\S]*?)<\/(?:span|p|div)>/i);
-            if (originMatch) {
-                originName = cleanText(originMatch[1]);
+            var enMatch = block.match(/<h3[^>]*class=["'][^"']*name\s+en[^"']*["'][^>]*>([\s\S]*?)<\/h3>/i);
+            if (enMatch) {
+                originName = cleanText(enMatch[1]);
             }
 
-            // Extract episode_current - look for episode status text
-            var episodeCurrent = "";
-            var epMatch = innerHtml.match(/<(?:span|div)[^>]*class="[^"]*(?:episode|status|ep)[^"]*"[^>]*>([\s\S]*?)<\/(?:span|div)>/i);
-            if (epMatch) {
-                episodeCurrent = cleanText(epMatch[1]);
+            // If no vi title, use en title
+            if (!title && originName) {
+                title = originName;
+                originName = "";
             }
+
+            if (!title || !id) continue;
+
+            // Avoid duplicates (same id can appear in multiple sections)
+            var isDuplicate = false;
+            for (var di = 0; di < items.length; di++) {
+                if (items[di].id === id) { isDuplicate = true; break; }
+            }
+            if (isDuplicate) continue;
 
             items.push({
                 id: id,
                 title: title,
                 originName: originName,
-                posterUrl: posterUrl,
-                episode_current: episodeCurrent
+                posterUrl: posterUrl
             });
+        }
+
+        // Fallback: if column parsing found nothing, try __NEXT_DATA__ apolloState
+        if (items.length === 0) {
+            var nextDataMatch = html.match(/<script[^>]*id=["']__NEXT_DATA__["'][^>]*>([\s\S]*?)<\/script>/i);
+            if (nextDataMatch) {
+                try {
+                    var nextData = JSON.parse(nextDataMatch[1]);
+                    var apolloState = nextData && nextData.props && nextData.props.apolloState;
+                    if (apolloState) {
+                        for (var key in apolloState) {
+                            if (!apolloState.hasOwnProperty(key)) continue;
+                            if (key.indexOf("Title:") !== 0) continue;
+                            if (key.indexOf(".") !== -1) continue;
+                            var entry = apolloState[key];
+                            if (!entry || !entry.id || !entry.nameVi) continue;
+                            var type = entry.type === "movie" ? "movie" : "tv";
+                            var slug = (entry.nameEn || entry.nameVi || "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+                            var itemId = type + "/" + slug + "~" + entry.id;
+                            var tmdbPoster = entry.tmdbPoster ? "https://image.tmdb.org/t/p/w500" + entry.tmdbPoster : "";
+                            items.push({
+                                id: itemId,
+                                title: entry.nameVi || entry.nameEn || "",
+                                originName: entry.nameEn || "",
+                                posterUrl: tmdbPoster
+                            });
+                        }
+                    }
+                } catch (e) {}
+            }
         }
 
         var pagination = extractPagination(html);
