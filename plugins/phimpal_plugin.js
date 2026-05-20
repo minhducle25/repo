@@ -316,17 +316,16 @@ function getUrlSearch(keyword, filtersJson) {
         // Handle null/undefined/non-string keyword by defaulting to empty string
         var q = (keyword === null || keyword === undefined) ? "" : String(keyword);
 
-        // URL-encode the keyword
-        var encoded = encodeURIComponent(q);
+        // PhimPal search uses a static suggestions JSON file that is updated hourly.
+        // The app fetches this file and filters client-side in parseSearchResponse.
+        var now = new Date();
+        var dateStr = now.toISOString().slice(0, 10);
+        var hour = now.getHours();
+        var url = BASE_URL + "/b/suggestions/titles-" + dateStr + "-" + hour + ".js";
 
-        var url = BASE_URL + "/search?q=" + encoded;
-
-        // Append &page={n} when page > 1
-        if (filters && filters.page) {
-            var page = parseInt(filters.page, 10);
-            if (!isNaN(page) && page > 1 && page === Math.floor(page)) {
-                url = url + "&page=" + page;
-            }
+        // Encode the keyword in a fragment so parseSearchResponse can extract it
+        if (q) {
+            url = url + "#q=" + encodeURIComponent(q);
         }
 
         return url;
@@ -423,29 +422,40 @@ function _parseListingHtml(html) {
             } catch (e) {}
         }
 
-        // Fallback: parse HTML img tags if __NEXT_DATA__ didn't work
+        // Fallback: parse HTML anchor tags if __NEXT_DATA__ didn't work
         if (items.length === 0) {
-            var coverRegex = /<a[^>]*class=["'][^"']*cover[^"']*["'][^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
-            var coverMatch;
-            while ((coverMatch = coverRegex.exec(html)) !== null) {
-                var cId = coverMatch[1];
-                var cInner = coverMatch[2];
-                var cPoster = "";
-                var cImg = cInner.match(/<img[^>]*src=["']([^"']+)["']/i);
-                if (cImg) cPoster = absoluteUrl(cImg[1]);
-                var cTitle = "";
-                var cAlt = cInner.match(/<img[^>]*alt=["']([^"']+)["']/i);
-                if (cAlt) cTitle = cleanText(cAlt[1]);
+            // Match any <a> whose href contains /(movie|tv)/slug~id pattern,
+            // regardless of class name or attribute order.
+            var anchorRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/((?:movie|tv)\/[^"']+~\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+            var anchorMatch;
+            while ((anchorMatch = anchorRegex.exec(html)) !== null) {
+                var aId = anchorMatch[1];
+                var aInner = anchorMatch[2];
+                var aPoster = "";
+                var aImg = aInner.match(/<img[^>]*src=["']([^"']+)["']/i);
+                if (aImg) aPoster = absoluteUrl(aImg[1]);
+                var aTitle = "";
+                // Try <h3> first (most common in listing items)
+                var aH3 = aInner.match(/<h3[^>]*>([\s\S]*?)<\/h3>/i);
+                if (aH3) {
+                    aTitle = cleanText(aH3[1]);
+                }
+                // Fallback to img alt attribute
+                if (!aTitle) {
+                    var aAlt = aInner.match(/<img[^>]*alt=["']([^"']+)["']/i);
+                    if (aAlt) aTitle = cleanText(aAlt[1]);
+                }
 
-                if (cId && cPoster) {
-                    // Check if already added
-                    var exists = false;
-                    for (var ei = 0; ei < items.length; ei++) {
-                        if (items[ei].id === cId) { exists = true; break; }
-                    }
-                    if (!exists) {
-                        items.push({ id: cId, title: cTitle || cId, posterUrl: cPoster });
-                    }
+                // Skip items with empty title
+                if (!aTitle) continue;
+
+                // Check if already added
+                var aExists = false;
+                for (var ei = 0; ei < items.length; ei++) {
+                    if (items[ei].id === aId) { aExists = true; break; }
+                }
+                if (!aExists) {
+                    items.push({ id: aId, title: aTitle, posterUrl: aPoster });
                 }
             }
         }
@@ -474,17 +484,77 @@ function parseListResponse(html) {
 }
 
 /**
- * Parse search results page HTML into items array and pagination object.
- * Search results on PhimPal have the same HTML structure as listing pages,
- * so this delegates directly to the shared internal parsing function.
- * Returns a JSON string: {items:[{id, title, originName, posterUrl, episode_current}], pagination:{currentPage, totalPages}}
+ * Parse search results from PhimPal's suggestions JSON file.
+ * The suggestions file is a JSON array of arrays:
+ *   [[id, nameEn, nameVi, imgUri, type, imdbId], ...]
+ * The keyword is passed via URL fragment (#q=...) from getUrlSearch.
+ * If the input looks like HTML (legacy fallback), delegates to _parseListingHtml.
+ * Returns a JSON string: {items:[{id, title, originName, posterUrl}], pagination:{currentPage, totalPages}}
  */
-function parseSearchResponse(html) {
+function parseSearchResponse(apiResponseJson, url) {
     try {
-        if (html === null || html === undefined || typeof html !== "string") {
+        if (apiResponseJson === null || apiResponseJson === undefined || typeof apiResponseJson !== "string") {
             return '{"items":[],"pagination":{"currentPage":1,"totalPages":1}}';
         }
-        return _parseListingHtml(html);
+
+        // If it starts with '<', it's HTML — use the listing parser as fallback
+        var trimmed = apiResponseJson.replace(/^\s+/, "");
+        if (trimmed.indexOf("<") === 0 || trimmed.indexOf("<!") === 0) {
+            return _parseListingHtml(apiResponseJson);
+        }
+
+        // Parse as JSON array (suggestions format)
+        var allItems = JSON.parse(apiResponseJson);
+        if (!Array.isArray(allItems)) {
+            return '{"items":[],"pagination":{"currentPage":1,"totalPages":1}}';
+        }
+
+        // Extract keyword from URL fragment (#q=...)
+        var keyword = "";
+        if (url && typeof url === "string") {
+            var hashIdx = url.indexOf("#q=");
+            if (hashIdx !== -1) {
+                keyword = decodeURIComponent(url.substring(hashIdx + 3)).toLowerCase();
+            }
+        }
+
+        // Filter items by keyword (match against nameEn or nameVi)
+        var items = [];
+        for (var i = 0; i < allItems.length && items.length < 30; i++) {
+            var entry = allItems[i];
+            if (!Array.isArray(entry) || entry.length < 5) continue;
+
+            var entryId = entry[0];
+            var nameEn = entry[1] || "";
+            var nameVi = entry[2] || "";
+            var imgUri = entry[3] || "";
+            var entryType = entry[4] || "movie";
+
+            if (!nameVi && !nameEn) continue;
+
+            // Filter by keyword if present
+            if (keyword) {
+                var lowerEn = nameEn.toLowerCase();
+                var lowerVi = nameVi.toLowerCase();
+                if (lowerEn.indexOf(keyword) === -1 && lowerVi.indexOf(keyword) === -1) {
+                    continue;
+                }
+            }
+
+            var type = (entryType === "show" || entryType === "tv") ? "tv" : "movie";
+            var slug = (nameEn || nameVi).toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+            var itemId = type + "/" + slug + "~" + entryId;
+            var posterUrl = imgUri ? "https://image.tmdb.org/t/p/w500" + imgUri : "";
+
+            items.push({
+                id: itemId,
+                title: nameVi || nameEn,
+                originName: nameEn,
+                posterUrl: posterUrl
+            });
+        }
+
+        return JSON.stringify({ items: items, pagination: { currentPage: 1, totalPages: 1 } });
     } catch (e) {
         return '{"items":[],"pagination":{"currentPage":1,"totalPages":1}}';
     }
@@ -802,9 +872,9 @@ function parseMovieDetail(html) {
                 }
             } else {
                 // Movie page: find "XEM PHIM" watch link with /watch/{id} href
-                var watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>[\s\S]*?XEM\s*PHIM[\s\S]*?<\/a>/i);
+                var watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/([^"']+)["'][^>]*>[\s\S]*?XEM\s*PHIM[\s\S]*?<\/a>/i);
                 if (!watchMatch) {
-                    watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>[^<]*XEM[^<]*PHIM[^<]*<\/a>/i);
+                    watchMatch = html.match(/<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/([^"']+)["'][^>]*>[^<]*XEM[^<]*PHIM[^<]*<\/a>/i);
                 }
                 if (watchMatch) {
                     var watchId2 = watchMatch[1];
@@ -816,16 +886,13 @@ function parseMovieDetail(html) {
                     });
                 } else {
                     // Season page: detect multiple episode links matching /watch/{id}
-                    var episodeLinkRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/(\d+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+                    var episodeLinkRegex = /<a[^>]*href=["'](?:https?:\/\/[^"']*?)?\/watch\/([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
                     var epLinkMatch;
                     var fbEpisodes = [];
-                    var seenEpIds = {};
                     while ((epLinkMatch = episodeLinkRegex.exec(html)) !== null) {
                         var epId = epLinkMatch[1];
                         var epText = cleanText(epLinkMatch[2]);
                         if (!epText) continue;
-                        if (seenEpIds[epId]) continue;
-                        seenEpIds[epId] = true;
                         fbEpisodes.push({
                             id: "watch/" + epId,
                             slug: "watch/" + epId,
